@@ -173,21 +173,12 @@ impl Database {
     }
 
     pub async fn list_runs(&self, query: &ListRunsQuery) -> Result<Vec<RunSummary>> {
-        let db = self.open_db().await?;
-        let run_ids = self.catalog_index().await?.list(query).await?;
-        let mut summaries = Vec::new();
-        for run_id in run_ids {
-            if let Some(active) = self.get_active_run(&run_id).await {
-                summaries.push(build_summary(&active.state().await?, &run_id));
-                continue;
-            }
-            if !RunDatabase::has_any_events(&db, &run_id).await? {
-                continue;
-            }
-            summaries.push(RunDatabase::build_summary(&db, &run_id).await?);
-        }
-        summaries.sort_by_key(|b| std::cmp::Reverse(b.run_id.created_at()));
-        Ok(summaries)
+        Ok(self
+            .list_runs_with_projection(query)
+            .await?
+            .into_iter()
+            .map(|(summary, _)| summary)
+            .collect())
     }
 
     pub async fn list_runs_with_projection(

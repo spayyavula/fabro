@@ -117,14 +117,6 @@ impl RunDatabase {
         Ok(iter.next().await?.is_some())
     }
 
-    pub(crate) async fn build_summary<R>(db: &R, run_id: &RunId) -> Result<RunSummary>
-    where
-        R: DbRead + Sync,
-    {
-        let (summary, _) = Self::build_summary_with_projection(db, run_id).await?;
-        Ok(summary)
-    }
-
     pub(crate) async fn build_summary_with_projection<R>(
         db: &R,
         run_id: &RunId,
