@@ -1,26 +1,41 @@
 import { watch as fsWatch } from "node:fs";
-import { cp, mkdir, readFile, readdir, rm, writeFile } from "node:fs/promises";
+import {
+  cp,
+  lstat,
+  mkdir,
+  readFile,
+  readdir,
+  rename,
+  rm,
+  symlink,
+  writeFile,
+} from "node:fs/promises";
 import { join, relative } from "node:path";
 
 declare const Bun: any;
 
 const root = new URL("..", import.meta.url);
 const rootPath = Bun.fileURLToPath(root);
-const distDir = join(rootPath, "dist");
-const assetsDir = join(distDir, "assets");
+const buildsRootDir = join(rootPath, ".dist-builds");
+const distPath = join(rootPath, "dist");
 const publicDir = join(rootPath, "public");
 const templatePath = join(rootPath, "index.template.html");
 const pierreWorkerDir = join(rootPath, "node_modules", "@pierre", "diffs", "dist", "worker");
-const pierreWorkerAssetsDir = join(assetsDir, "pierre-diffs-worker");
 const watch = Bun.argv.includes("--watch");
 
+function newBuildId(): string {
+  return `${Date.now()}-${Math.random().toString(36).slice(2, 10)}`;
+}
+
 async function buildOnce() {
-  await rm(distDir, { recursive: true, force: true });
-  await mkdir(assetsDir, { recursive: true });
+  const buildId = newBuildId();
+  const buildDir = join(buildsRootDir, buildId);
+  const buildAssetsDir = join(buildDir, "assets");
+  await mkdir(buildAssetsDir, { recursive: true });
 
   const result = await Bun.build({
     entrypoints: [join(rootPath, "app", "entry.tsx")],
-    outdir: assetsDir,
+    outdir: buildAssetsDir,
     naming: "[name]-[hash].[ext]",
     minify: true,
     splitting: true,
@@ -32,12 +47,11 @@ async function buildOnce() {
   }
 
   const cssResult = await Bun.spawn([
-    "bunx",
-    "@tailwindcss/cli",
+    "./node_modules/.bin/tailwindcss",
     "-i",
     "app/app.css",
     "-o",
-    "dist/assets/app.css",
+    relative(rootPath, join(buildAssetsDir, "app.css")),
     "--minify",
   ], {
     cwd: rootPath,
@@ -49,26 +63,32 @@ async function buildOnce() {
     throw new Error("Tailwind build failed");
   }
 
-  await cp(publicDir, distDir, { recursive: true });
-  await copyPierreWorkerAssets();
-  await writeIndexHtml(result.outputs.map((output: any) => relative(distDir, output.path)));
+  await cp(publicDir, buildDir, { recursive: true });
+  await copyPierreWorkerAssets(join(buildAssetsDir, "pierre-diffs-worker"));
+  await writeIndexHtml(
+    buildDir,
+    result.outputs.map((output: any) => relative(buildDir, output.path)),
+  );
+
+  await publishBuild(buildDir);
+  await pruneOldBuilds(buildId);
 }
 
-async function copyPierreWorkerAssets() {
-  await mkdir(pierreWorkerAssetsDir, { recursive: true });
+async function copyPierreWorkerAssets(targetDir: string) {
+  await mkdir(targetDir, { recursive: true });
   await cp(
     join(pierreWorkerDir, "worker-portable.js"),
-    join(pierreWorkerAssetsDir, "worker-portable.js"),
+    join(targetDir, "worker-portable.js"),
   );
 
   const files = await readdir(pierreWorkerDir);
   for (const file of files) {
     if (!/^wasm-.*\.js$/.test(file)) continue;
-    await cp(join(pierreWorkerDir, file), join(pierreWorkerAssetsDir, file));
+    await cp(join(pierreWorkerDir, file), join(targetDir, file));
   }
 }
 
-async function writeIndexHtml(outputs: string[]) {
+async function writeIndexHtml(buildDir: string, outputs: string[]) {
   const template = await readFile(templatePath, "utf8");
   const scripts = outputs
     .filter((path) => path.endsWith(".js"))
@@ -86,7 +106,52 @@ async function writeIndexHtml(outputs: string[]) {
     .replace("{{styles}}", styles)
     .replace("{{scripts}}", scripts);
 
-  await writeFile(join(distDir, "index.html"), html, "utf8");
+  await writeFile(join(buildDir, "index.html"), html, "utf8");
+}
+
+// Atomically point `dist` at the freshly-built directory. Symlink replacement
+// via rename(2) is atomic on macOS and Linux, so readers never see a partial
+// build: they either resolve through the old symlink or the new one.
+async function publishBuild(buildDir: string) {
+  // Migrate from the pre-symlink layout: if `dist` exists as a real directory
+  // (left over from an older version of this script), remove it so we can
+  // replace it with a symlink. Hit at most once per machine.
+  const existing = await lstatOrNull(distPath);
+  if (existing && !existing.isSymbolicLink()) {
+    await rm(distPath, { recursive: true, force: true });
+  }
+
+  const tmpLink = `${distPath}.tmp.${process.pid}.${Date.now()}`;
+  await symlink(relative(rootPath, buildDir), tmpLink);
+  await rename(tmpLink, distPath);
+}
+
+async function lstatOrNull(path: string) {
+  try {
+    return await lstat(path);
+  } catch (error: any) {
+    if (error?.code === "ENOENT") return null;
+    throw error;
+  }
+}
+
+async function pruneOldBuilds(currentId: string) {
+  let entries: string[];
+  try {
+    entries = await readdir(buildsRootDir);
+  } catch (error: any) {
+    if (error?.code === "ENOENT") return;
+    throw error;
+  }
+
+  for (const entry of entries) {
+    if (entry === currentId) continue;
+    try {
+      await rm(join(buildsRootDir, entry), { recursive: true, force: true });
+    } catch (error) {
+      console.error(`Failed to prune ${entry}:`, error);
+    }
+  }
 }
 
 async function main() {

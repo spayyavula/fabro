@@ -1,11 +1,11 @@
 import { test, expect } from "bun:test";
 import { existsSync } from "node:fs";
-import { readdir } from "node:fs/promises";
+import { lstat, readdir, readlink } from "node:fs/promises";
 import { basename, join } from "node:path";
 
 const root = Bun.fileURLToPath(new URL("..", import.meta.url));
 
-test("production build copies Pierre worker assets", async () => {
+async function runBuild() {
   const process = Bun.spawn(["bun", "run", "scripts/build.ts"], {
     cwd:    root,
     stdout: "pipe",
@@ -20,6 +20,10 @@ test("production build copies Pierre worker assets", async () => {
       `build failed with code ${code}\nstdout:\n${stdout}\nstderr:\n${stderr}`,
     );
   }
+}
+
+test("production build copies Pierre worker assets", async () => {
+  await runBuild();
 
   const workerDist = join(root, "dist", "assets", "pierre-diffs-worker");
   expect(existsSync(join(workerDist, "worker-portable.js"))).toBe(true);
@@ -39,6 +43,25 @@ test("production build copies Pierre worker assets", async () => {
   for (const wasmFile of wasmFiles) {
     expect(existsSync(join(workerDist, wasmFile))).toBe(true);
   }
+});
+
+test("dist is a symlink into .dist-builds and old builds are pruned", async () => {
+  await runBuild();
+  await runBuild();
+
+  const distPath = join(root, "dist");
+  const stat = await lstat(distPath);
+  expect(stat.isSymbolicLink()).toBe(true);
+
+  const target = await readlink(distPath);
+  expect(target.startsWith(".dist-builds/")).toBe(true);
+
+  const buildId = target.slice(".dist-builds/".length);
+  const buildsRoot = join(root, ".dist-builds");
+  const remaining = await readdir(buildsRoot);
+  expect(remaining).toEqual([buildId]);
+
+  expect(existsSync(join(distPath, "index.html"))).toBe(true);
 });
 
 test("watch mode keeps running until interrupted", async () => {

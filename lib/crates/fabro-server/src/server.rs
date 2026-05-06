@@ -958,6 +958,11 @@ pub struct RouterOptions {
     pub static_asset_root:           Option<PathBuf>,
     pub github_endpoints:            Option<Arc<GithubEndpoints>>,
     pub github_webhook_ip_allowlist: Option<Arc<IpAllowlistConfig>>,
+    /// Set when serving with the `--watch-web` dev flag. The static-file
+    /// handler then refuses to fall back to the embedded SPA snapshot and
+    /// returns a 503 "build in progress" page on miss, so developers see
+    /// their edits or a clear signal — never stale embedded bytes.
+    pub watch_web:                   bool,
 }
 
 impl Default for RouterOptions {
@@ -967,6 +972,7 @@ impl Default for RouterOptions {
             static_asset_root:           None,
             github_endpoints:            None,
             github_webhook_ip_allowlist: None,
+            watch_web:                   false,
         }
     }
 }
@@ -985,6 +991,7 @@ pub fn build_router_with_options(
     start_optional_slack_service(&state);
     let web_enabled = options.web_enabled;
     let static_asset_root = options.static_asset_root.clone();
+    let watch_web = options.watch_web;
     let webhook_ip_allowlist = options.github_webhook_ip_allowlist;
     let translation_state = Arc::clone(&state);
     let state_for_canonical_host = Arc::clone(&state);
@@ -1063,6 +1070,7 @@ pub fn build_router_with_options(
                             &path,
                             &headers,
                             static_asset_root.as_deref(),
+                            watch_web,
                         )
                         .await,
                     )

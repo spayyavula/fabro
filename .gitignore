@@ -2,7 +2,8 @@ target
 .env
 .entire
 node_modules
-apps/fabro-web/dist/
+apps/fabro-web/dist
+apps/fabro-web/.dist-builds/
 lib/crates/fabro-spa/assets/*
 !lib/crates/fabro-spa/assets/.gitkeep
 tmp

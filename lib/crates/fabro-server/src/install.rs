@@ -635,6 +635,7 @@ pub fn build_install_router(state: InstallAppState) -> Router {
                             &path,
                             &headers,
                             static_asset_root.as_deref(),
+                            false,
                         )
                         .await,
                     )
@@ -1739,6 +1740,7 @@ async fn render_install_shell(
         uri.path(),
         &headers,
         state.static_asset_root.as_deref(),
+        false,
     )
     .await
 }

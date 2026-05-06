@@ -652,8 +652,16 @@ where
     std::fs::create_dir_all(&data_dir)
         .with_context(|| format!("creating data directory {}", data_dir.display()))?;
     let max_concurrent_runs = resolved_server_settings.scheduler.max_concurrent_runs;
+    // In `--watch-web` mode the build watcher will populate `dist/` shortly
+    // after startup. Treat that the same as assets being present so the web
+    // UI is enabled from the first request rather than getting silently
+    // demoted to API-only on a cold boot.
+    #[cfg(debug_assertions)]
+    let assume_assets_pending = watch_web;
+    #[cfg(not(debug_assertions))]
+    let assume_assets_pending = false;
     let web_enabled = if resolved_server_settings.web.enabled {
-        if static_files::assets_available() {
+        if static_files::assets_available() || assume_assets_pending {
             true
         } else if args.web {
             bail!("--web requires web UI assets, but none were found");
@@ -734,6 +742,8 @@ where
         RouterOptions {
             web_enabled,
             github_webhook_ip_allowlist,
+            #[cfg(debug_assertions)]
+            watch_web,
             ..RouterOptions::default()
         },
     );

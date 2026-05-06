@@ -1356,6 +1356,7 @@ client_id = "github-client-id"
                 ))),
                 github_webhook_ip_allowlist: None,
                 static_asset_root:           None,
+                watch_web:                   false,
             },
         );
 
