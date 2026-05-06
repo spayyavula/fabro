@@ -1148,6 +1148,7 @@ fabro system [OPTIONS] <COMMAND>
 | `fabro system events` | Stream run events from the server |
 | `fabro system info` | Show server runtime information |
 | `fabro system prune` | Delete old workflow runs |
+| `fabro system repair` | Inspect and repair durable server data |
 
 #### `fabro system df`
 
@@ -1216,6 +1217,35 @@ fabro system prune [OPTIONS]
 | `--storage-dir <storage_dir>` | Local storage directory (default: ~/.fabro/storage) |
 | `--workflow <workflow>` | Filter by workflow name (substring match) |
 | `--yes` | Actually delete (default is dry-run) |
+
+#### `fabro system repair`
+
+Inspect and repair durable server data
+
+```bash
+fabro system repair [OPTIONS] <COMMAND>
+```
+
+#### Subcommands
+
+| Command | Description |
+| --- | --- |
+| `fabro system repair runs` | List runs that cannot be loaded from durable storage |
+
+##### `fabro system repair runs`
+
+List runs that cannot be loaded from durable storage
+
+```bash
+fabro system repair runs [OPTIONS]
+```
+
+#### Options
+
+| Option | Description |
+| --- | --- |
+| `--server <server>` | Fabro server target: http(s) URL or absolute Unix socket path |
+| `--storage-dir <storage_dir>` | Local storage directory (default: ~/.fabro/storage) |
 
 ### `fabro unarchive`
 
