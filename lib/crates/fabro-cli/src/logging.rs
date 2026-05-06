@@ -2,14 +2,22 @@
     clippy::disallowed_methods,
     reason = "CLI logging setup: sync directory scan during startup"
 )]
+use std::fmt::Write as _;
+use std::io::IsTerminal;
 use std::path::{Path, PathBuf};
 
 use anyhow::{Context, Result};
+use console::Style;
 use fabro_static::EnvVars;
 use fabro_util::run_log::BufferedFileAppender;
+use tracing::field::{Field, Visit};
+use tracing::{Event, Level, Subscriber};
 use tracing_appender::rolling;
+use tracing_subscriber::fmt::FmtContext;
+use tracing_subscriber::fmt::format::{FormatEvent, FormatFields, Writer};
 use tracing_subscriber::fmt::writer::MakeWriter;
 use tracing_subscriber::layer::SubscriberExt;
+use tracing_subscriber::registry::LookupSpan;
 use tracing_subscriber::util::SubscriberInitExt;
 use tracing_subscriber::{EnvFilter, fmt};
 
@@ -72,7 +80,7 @@ pub(crate) fn init_tracing(
         InternalLogSink::Server {
             log: LogSink::Stdout,
         } => {
-            init_subscriber(filter, std::io::stdout);
+            init_stdout_subscriber(filter, std::io::stdout);
         }
         InternalLogSink::Worker {
             server_log: LogSink::File(server_log_path),
@@ -88,15 +96,164 @@ pub(crate) fn init_tracing(
             server_log: LogSink::Stdout,
             per_run_log_path,
         } => {
-            init_worker_subscriber(
-                filter,
-                std::io::stdout,
-                open_buffered_appender(per_run_log_path)?,
-            );
+            let per_run_appender = open_buffered_appender(per_run_log_path)?;
+            init_worker_stdout_subscriber(filter, std::io::stdout, per_run_appender);
         }
     }
 
     Ok(())
+}
+
+#[derive(Clone, Copy, Debug)]
+struct TtyLogFormat {
+    ansi: bool,
+}
+
+impl TtyLogFormat {
+    fn new(ansi: bool) -> Self {
+        Self { ansi }
+    }
+}
+
+impl<S, N> FormatEvent<S, N> for TtyLogFormat
+where
+    S: Subscriber + for<'a> LookupSpan<'a>,
+    N: for<'a> FormatFields<'a> + 'static,
+{
+    fn format_event(
+        &self,
+        _ctx: &FmtContext<'_, S, N>,
+        mut writer: Writer<'_>,
+        event: &Event<'_>,
+    ) -> std::fmt::Result {
+        const MESSAGE_WIDTH: usize = 42;
+
+        let metadata = event.metadata();
+        let mut fields = EventFieldVisitor::default();
+        event.record(&mut fields);
+
+        let timestamp = chrono::Local::now().format("%Y-%m-%d %H:%M:%S%.3f");
+        write!(
+            writer,
+            "{}  {}  ",
+            self.dim(timestamp),
+            self.level(*metadata.level())
+        )?;
+
+        if should_show_target(*metadata.level()) {
+            write!(writer, "{}  ", self.dim(metadata.target()))?;
+        }
+
+        let message = fields.message.as_deref().unwrap_or_default();
+        if !message.is_empty() {
+            write!(writer, "{message}")?;
+        }
+
+        let formatted_fields = fields.format_fields();
+        if !formatted_fields.is_empty() {
+            if !message.is_empty() {
+                let padding = MESSAGE_WIDTH.saturating_sub(message.len()) + 2;
+                writer.write_str(&" ".repeat(padding))?;
+            }
+
+            write!(writer, "{}", self.dim(formatted_fields))?;
+        }
+
+        writeln!(writer)
+    }
+}
+
+impl TtyLogFormat {
+    fn level(self, level: Level) -> String {
+        let padded = format!("{level:<5}");
+        let style = match level {
+            Level::ERROR => Style::new().red().bold(),
+            Level::WARN => Style::new().yellow(),
+            Level::INFO => Style::new().green(),
+            Level::DEBUG => Style::new().cyan().dim(),
+            Level::TRACE => Style::new().dim(),
+        }
+        .force_styling(self.ansi);
+
+        format!("{}", style.apply_to(padded))
+    }
+
+    fn dim(self, value: impl std::fmt::Display) -> String {
+        format!(
+            "{}",
+            Style::new().dim().force_styling(self.ansi).apply_to(value)
+        )
+    }
+}
+
+#[derive(Default)]
+struct EventFieldVisitor {
+    message: Option<String>,
+    fields:  Vec<(String, String)>,
+}
+
+impl EventFieldVisitor {
+    fn record_value(&mut self, field: &Field, value: String) {
+        if field.name() == "message" {
+            self.message = Some(value);
+            return;
+        }
+
+        self.fields.push((field.name().to_string(), value));
+    }
+
+    fn format_fields(&self) -> String {
+        let mut output = String::new();
+        for (index, (name, value)) in self.fields.iter().enumerate() {
+            if index > 0 {
+                output.push(' ');
+            }
+            let _ = write!(output, "{name}={value}");
+        }
+        output
+    }
+}
+
+impl Visit for EventFieldVisitor {
+    fn record_debug(&mut self, field: &Field, value: &dyn std::fmt::Debug) {
+        self.record_value(field, format!("{value:?}"));
+    }
+
+    fn record_str(&mut self, field: &Field, value: &str) {
+        if field.name() == "message" {
+            self.record_value(field, value.to_string());
+        } else {
+            self.record_value(field, format!("{value:?}"));
+        }
+    }
+
+    fn record_i64(&mut self, field: &Field, value: i64) {
+        self.record_value(field, value.to_string());
+    }
+
+    fn record_u64(&mut self, field: &Field, value: u64) {
+        self.record_value(field, value.to_string());
+    }
+
+    fn record_i128(&mut self, field: &Field, value: i128) {
+        self.record_value(field, value.to_string());
+    }
+
+    fn record_u128(&mut self, field: &Field, value: u128) {
+        self.record_value(field, value.to_string());
+    }
+
+    fn record_bool(&mut self, field: &Field, value: bool) {
+        self.record_value(field, value.to_string());
+    }
+
+    fn record_error(&mut self, field: &Field, value: &(dyn std::error::Error + 'static)) {
+        self.record_value(field, value.to_string());
+    }
+}
+
+fn should_show_target(level: Level) -> bool {
+    matches!(level, Level::DEBUG | Level::TRACE)
 }
 
 fn cleanup_old_logs(log_dir: &Path, prefix: &str, max_age_days: u32) {
@@ -146,6 +303,27 @@ where
         .init();
 }
 
+fn init_stdout_subscriber<W>(filter: EnvFilter, stdout_writer: W)
+where
+    W: for<'writer> MakeWriter<'writer> + Send + Sync + 'static,
+{
+    if !std::io::stdout().is_terminal() {
+        init_subscriber(filter, stdout_writer);
+        return;
+    }
+
+    let ansi = console::colors_enabled();
+    tracing_subscriber::registry()
+        .with(filter)
+        .with(
+            fmt::layer()
+                .with_writer(stdout_writer)
+                .with_ansi(ansi)
+                .event_format(TtyLogFormat::new(ansi)),
+        )
+        .init();
+}
+
 fn init_worker_subscriber<ServerWriter, RunWriter>(
     filter: EnvFilter,
     server_writer: ServerWriter,
@@ -171,7 +349,192 @@ fn init_worker_subscriber<ServerWriter, RunWriter>(
         .init();
 }
 
+fn init_worker_stdout_subscriber<ServerWriter, RunWriter>(
+    filter: EnvFilter,
+    server_writer: ServerWriter,
+    run_writer: RunWriter,
+) where
+    ServerWriter: for<'writer> MakeWriter<'writer> + Send + Sync + 'static,
+    RunWriter: for<'writer> MakeWriter<'writer> + Send + Sync + 'static,
+{
+    if !std::io::stdout().is_terminal() {
+        init_worker_subscriber(filter, server_writer, run_writer);
+        return;
+    }
+
+    let ansi = console::colors_enabled();
+    tracing_subscriber::registry()
+        .with(filter)
+        .with(
+            fmt::layer()
+                .with_writer(server_writer)
+                .with_ansi(ansi)
+                .event_format(TtyLogFormat::new(ansi)),
+        )
+        .with(
+            fmt::layer()
+                .with_writer(run_writer)
+                .with_target(true)
+                .with_ansi(false),
+        )
+        .init();
+}
+
 fn open_buffered_appender(path: &Path) -> Result<BufferedFileAppender> {
     BufferedFileAppender::open(path)
         .with_context(|| format!("Failed to open log file: {}", path.display()))
+}
+
+#[cfg(test)]
+mod tests {
+    use std::sync::{Arc, Mutex};
+    use std::{fmt as std_fmt, io};
+
+    use tracing::subscriber;
+    use tracing_subscriber::fmt::MakeWriter;
+    use tracing_subscriber::prelude::*;
+    use tracing_subscriber::{fmt as tracing_fmt, registry};
+
+    use super::TtyLogFormat;
+
+    #[test]
+    fn tty_format_timestamp_includes_calendar_date() {
+        let output = render_tty_event(false, || {
+            tracing::info!("API server started");
+        });
+
+        assert!(
+            output.starts_with_timestamp(),
+            "expected date-bearing timestamp at start, got: {output:?}"
+        );
+    }
+
+    #[test]
+    fn tty_format_info_hides_target_and_preserves_message_and_fields() {
+        let output = render_tty_event(false, || {
+            tracing::info!(
+                target: "fabro_server::server",
+                bind = %"/tmp/fabro.sock",
+                "API server started"
+            );
+        });
+
+        assert!(output.contains("INFO"));
+        assert!(output.contains("API server started"));
+        assert!(output.contains("bind=/tmp/fabro.sock"));
+        assert!(
+            !output.contains("fabro_server::server"),
+            "INFO output should hide the target, got: {output:?}"
+        );
+    }
+
+    #[test]
+    fn tty_format_debug_includes_target() {
+        let output = render_tty_event(false, || {
+            tracing::debug!(
+                target: "fabro_server::server",
+                run = %"run_abc123",
+                "Spawning worker"
+            );
+        });
+
+        assert!(output.contains("DEBUG"));
+        assert!(output.contains("fabro_server::server"));
+        assert!(output.contains("Spawning worker"));
+        assert!(output.contains("run=run_abc123"));
+    }
+
+    #[test]
+    fn tty_format_with_color_contains_ansi_sequences() {
+        let output = render_tty_event(true, || {
+            tracing::warn!(attempt = 2, "LLM request failed, retrying");
+        });
+
+        assert!(
+            output.contains("\x1b["),
+            "color-enabled output should contain ANSI sequences, got: {output:?}"
+        );
+    }
+
+    #[test]
+    fn tty_format_without_color_contains_no_ansi_sequences() {
+        let output = render_tty_event(false, || {
+            tracing::error!(error = %"rate limited", "Request failed");
+        });
+
+        assert!(
+            !output.contains("\x1b["),
+            "color-disabled output should be plain, got: {output:?}"
+        );
+    }
+
+    fn render_tty_event(ansi: bool, emit: impl FnOnce()) -> String {
+        let output = CapturedTrace::default();
+        let subscriber = registry().with(
+            tracing_fmt::layer()
+                .with_writer(output.clone())
+                .event_format(TtyLogFormat::new(ansi)),
+        );
+
+        subscriber::with_default(subscriber, emit);
+
+        output.captured_output()
+    }
+
+    trait TimestampAssertion {
+        fn starts_with_timestamp(&self) -> bool;
+    }
+
+    impl TimestampAssertion for str {
+        fn starts_with_timestamp(&self) -> bool {
+            let Some(timestamp) = self.get(..23) else {
+                return false;
+            };
+
+            chrono::NaiveDateTime::parse_from_str(timestamp, "%Y-%m-%d %H:%M:%S%.3f").is_ok()
+        }
+    }
+
+    #[derive(Clone, Default)]
+    struct CapturedTrace {
+        buffer: Arc<Mutex<Vec<u8>>>,
+    }
+
+    impl CapturedTrace {
+        fn captured_output(&self) -> String {
+            let buffer = self.buffer.lock().unwrap();
+            String::from_utf8(buffer.clone()).unwrap()
+        }
+    }
+
+    impl<'writer> MakeWriter<'writer> for CapturedTrace {
+        type Writer = CapturedTraceWriter;
+
+        fn make_writer(&'writer self) -> Self::Writer {
+            CapturedTraceWriter {
+                buffer: Arc::clone(&self.buffer),
+            }
+        }
+    }
+
+    struct CapturedTraceWriter {
+        buffer: Arc<Mutex<Vec<u8>>>,
+    }
+
+    impl io::Write for CapturedTraceWriter {
+        fn write(&mut self, bytes: &[u8]) -> io::Result<usize> {
+            self.buffer.lock().unwrap().extend_from_slice(bytes);
+            Ok(bytes.len())
+        }
+
+        fn flush(&mut self) -> io::Result<()> {
+            Ok(())
+        }
+    }
+
+    impl std_fmt::Debug for CapturedTraceWriter {
+        fn fmt(&self, formatter: &mut std_fmt::Formatter<'_>) -> std_fmt::Result {
+            formatter.debug_struct("CapturedTraceWriter").finish()
+        }
+    }
 }
