@@ -1,0 +1,35 @@
+---
+title: "Refreshable GitHub workflow tokens"
+date: "2026-05-06"
+---
+
+<Warning>
+**Static `ghs_*` tokens are rejected.** GitHub installation access tokens expire quickly and should not be stored as static `GITHUB_TOKEN` values.
+
+To migrate:
+1. Replace static `ghs_*` tokens with a personal access token, or configure GitHub App mode.
+2. In GitHub App mode, request scoped run tokens with `[run.integrations.github.permissions]`.
+</Warning>
+
+## Refreshable GitHub tokens during workflows
+
+Long-running workflows that used GitHub App installation tokens could outlive the first token minted for the run. Fabro now keeps GitHub credentials as a refreshable token source and resolves `GITHUB_TOKEN` lazily before command and API agent stages, so GitHub operations can continue after token rollover.
+
+Tokens refresh when they are close to expiry. If a refresh fails while the cached token is still valid, Fabro keeps using the cached token and logs a warning; expired tokens now fail explicitly instead of surfacing later as confusing GitHub authentication errors.
+
+## More
+
+<Accordion title="Workflows">
+- Command stages and API agent stages resolve `GITHUB_TOKEN` from a refreshable source before use
+- GitHub App installation tokens refresh when they are within 15 minutes of expiry
+- CLI agent stages now surface their launch-time token refresh limitation
+</Accordion>
+
+<Accordion title="Improvements">
+- Agent file reads now parallelize `read_many_files` work
+</Accordion>
+
+<Accordion title="Fixes">
+- Fixed long-running GitHub App workflows losing GitHub access after the initial installation token expired
+- Fixed static configuration accepting short-lived `ghs_*` installation tokens
+</Accordion>
