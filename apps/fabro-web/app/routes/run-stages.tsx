@@ -44,6 +44,14 @@ const EVENT_KIND_LABEL: Record<EventKind, string> = {
   command: "Command",
 };
 
+const EVENTS_TABS = ["transcript", "debug"] as const;
+type EventsTab = (typeof EVENTS_TABS)[number];
+
+const EVENTS_TAB_LABEL: Record<EventsTab, string> = {
+  transcript: "Transcript",
+  debug: "Debug",
+};
+
 function assertNever(value: never): never {
   throw new Error(`Unhandled stage activity event type: ${value}`);
 }
@@ -527,6 +535,41 @@ function EventDetailsPanel({
   );
 }
 
+function EventsTabToggle({
+  tab,
+  onTabChange,
+}: {
+  tab: EventsTab;
+  onTabChange: (tab: EventsTab) => void;
+}) {
+  return (
+    <div
+      role="group"
+      aria-label="View"
+      className="inline-flex rounded-md bg-panel p-0.5 outline-1 -outline-offset-1 outline-line-strong"
+    >
+      {EVENTS_TABS.map((value) => {
+        const active = tab === value;
+        return (
+          <button
+            key={value}
+            type="button"
+            onClick={() => onTabChange(value)}
+            aria-pressed={active}
+            className={`rounded px-2.5 py-1 text-xs font-medium transition-colors focus-visible:outline-2 focus-visible:outline-offset-1 focus-visible:outline-teal-500 ${
+              active
+                ? "bg-overlay-strong text-fg"
+                : "text-fg-muted hover:text-fg-2"
+            }`}
+          >
+            {EVENTS_TAB_LABEL[value]}
+          </button>
+        );
+      })}
+    </div>
+  );
+}
+
 function KindFilter({
   selected,
   onChange,
@@ -606,6 +649,8 @@ function SearchInput({
 }
 
 function EventsToolbar({
+  tab,
+  onTabChange,
   selectedKinds,
   onKindsChange,
   search,
@@ -613,6 +658,8 @@ function EventsToolbar({
   filteredCount,
   totalCount,
 }: {
+  tab: EventsTab;
+  onTabChange: (tab: EventsTab) => void;
   selectedKinds: EventKind[];
   onKindsChange: (kinds: EventKind[]) => void;
   search: string;
@@ -622,6 +669,7 @@ function EventsToolbar({
 }) {
   const allKindsSelected = selectedKinds.length === EVENT_KINDS.length;
   const isFiltering = !allKindsSelected || search.length > 0;
+  const showTranscriptControls = tab === "transcript";
 
   function clearFilters() {
     onKindsChange([...EVENT_KINDS]);
@@ -630,20 +678,25 @@ function EventsToolbar({
 
   return (
     <div className="flex flex-wrap items-center gap-x-3 gap-y-2 border-b border-line pb-3">
-      <div className="flex flex-1 flex-wrap items-center gap-2">
-        <KindFilter selected={selectedKinds} onChange={onKindsChange} />
-        <SearchInput value={search} onChange={onSearchChange} />
-        {isFiltering && (
-          <button
-            type="button"
-            onClick={clearFilters}
-            className="rounded px-2 py-1 text-xs text-fg-muted transition-colors hover:bg-overlay hover:text-fg-2 focus-visible:outline-2 focus-visible:outline-offset-1 focus-visible:outline-teal-500"
-          >
-            Clear
-          </button>
-        )}
-      </div>
-      {isFiltering && totalCount > 0 && (
+      <EventsTabToggle tab={tab} onTabChange={onTabChange} />
+      {showTranscriptControls ? (
+        <div className="flex flex-1 flex-wrap items-center gap-2">
+          <KindFilter selected={selectedKinds} onChange={onKindsChange} />
+          <SearchInput value={search} onChange={onSearchChange} />
+          {isFiltering && (
+            <button
+              type="button"
+              onClick={clearFilters}
+              className="rounded px-2 py-1 text-xs text-fg-muted transition-colors hover:bg-overlay hover:text-fg-2 focus-visible:outline-2 focus-visible:outline-offset-1 focus-visible:outline-teal-500"
+            >
+              Clear
+            </button>
+          )}
+        </div>
+      ) : (
+        <div className="flex-1" />
+      )}
+      {showTranscriptControls && isFiltering && totalCount > 0 && (
         <span className="text-xs tabular-nums text-fg-muted">
           {filteredCount.toLocaleString()} of {totalCount.toLocaleString()} events
         </span>
@@ -678,6 +731,7 @@ export default function RunStages() {
   }, [selectedStageId]);
   const openTurn = openIndex != null ? turns[openIndex] ?? null : null;
 
+  const [tab, setTab] = useState<EventsTab>("transcript");
   const [selectedKinds, setSelectedKinds] = useState<EventKind[]>([
     ...EVENT_KINDS,
   ]);
@@ -723,6 +777,8 @@ export default function RunStages() {
       <div className="flex min-h-0 min-w-0 flex-1 flex-col pl-3 pt-6">
         <div className="shrink-0">
           <EventsToolbar
+            tab={tab}
+            onTabChange={setTab}
             selectedKinds={selectedKinds}
             onKindsChange={setSelectedKinds}
             search={search}
@@ -732,26 +788,28 @@ export default function RunStages() {
           />
         </div>
         <div className="min-h-0 flex-1 overflow-y-auto pb-6 pt-2">
-          {turns.length > 0 && filteredTurns.length === 0 ? (
-            <div className="px-2 py-6 text-sm text-fg-muted">
-              No events match these filters.
-            </div>
-          ) : (
-            filteredTurns.map(({ turn, index }) => (
-              <EventRow
-                key={`turn-${index}`}
-                turn={turn}
-                runStart={runStart}
-                selected={openIndex === index}
-                onSelect={() => setOpenIndex(index)}
-              />
-            ))
-          )}
+          {tab === "transcript" ? (
+            turns.length > 0 && filteredTurns.length === 0 ? (
+              <div className="px-2 py-6 text-sm text-fg-muted">
+                No events match these filters.
+              </div>
+            ) : (
+              filteredTurns.map(({ turn, index }) => (
+                <EventRow
+                  key={`turn-${index}`}
+                  turn={turn}
+                  runStart={runStart}
+                  selected={openIndex === index}
+                  onSelect={() => setOpenIndex(index)}
+                />
+              ))
+            )
+          ) : null}
         </div>
       </div>
 
       <EventDetailsPanel
-        turn={openTurn}
+        turn={tab === "transcript" ? openTurn : null}
         runStart={runStart}
         onClose={() => setOpenIndex(null)}
       />
