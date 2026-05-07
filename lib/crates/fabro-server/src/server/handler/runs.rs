@@ -92,12 +92,13 @@ fn board_column(status: RunStatus) -> Option<BoardColumn> {
         RunStatus::Blocked { .. } => Some(BoardColumn::Blocked),
         RunStatus::Succeeded { .. } => Some(BoardColumn::Succeeded),
         RunStatus::Failed { .. } | RunStatus::Dead => Some(BoardColumn::Failed),
-        RunStatus::Removing | RunStatus::Archived { .. } => None,
+        RunStatus::Archived { .. } => Some(BoardColumn::Archived),
+        RunStatus::Removing => None,
     }
 }
 
-pub(crate) fn board_columns() -> Vec<BoardColumnDefinition> {
-    vec![
+pub(crate) fn board_columns(include_archived: bool) -> Vec<BoardColumnDefinition> {
+    let mut columns = vec![
         BoardColumnDefinition {
             id:   BoardColumn::Queued,
             name: "Queued".into(),
@@ -122,7 +123,14 @@ pub(crate) fn board_columns() -> Vec<BoardColumnDefinition> {
             id:   BoardColumn::Failed,
             name: "Failed".into(),
         },
-    ]
+    ];
+    if include_archived {
+        columns.push(BoardColumnDefinition {
+            id:   BoardColumn::Archived,
+            name: "Archived".into(),
+        });
+    }
+    columns
 }
 
 fn board_run_metadata_from_projection(
@@ -187,7 +195,7 @@ fn paginate_items<T>(items: Vec<T>, pagination: &PaginationParams) -> (Vec<T>, b
 async fn list_board_runs(
     _auth: RequiredUser,
     State(state): State<Arc<AppState>>,
-    Query(pagination): Query<PaginationParams>,
+    Query(params): Query<ListRunsParams>,
 ) -> Response {
     let entries = match state
         .store
@@ -200,14 +208,18 @@ async fn list_board_runs(
                 .into_response();
         }
     };
+    let include_archived = params.include_archived;
     let board_summaries: Vec<_> = entries
         .into_iter()
         .filter_map(|entry| {
             let column = board_column(entry.summary.status)?;
+            if column == BoardColumn::Archived && !include_archived {
+                return None;
+            }
             Some((entry, column))
         })
         .collect();
-    let (page_summaries, has_more) = paginate_items(board_summaries, &pagination);
+    let (page_summaries, has_more) = paginate_items(board_summaries, &params.pagination());
 
     let mut data = Vec::with_capacity(page_summaries.len());
     for (entry, column) in page_summaries {
@@ -222,7 +234,7 @@ async fn list_board_runs(
     (
         StatusCode::OK,
         Json(serde_json::json!({
-            "columns": board_columns(),
+            "columns": board_columns(include_archived),
             "data": data,
             "meta": { "has_more": has_more }
         })),

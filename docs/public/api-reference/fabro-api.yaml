@@ -1417,10 +1417,11 @@ paths:
       operationId: listBoardRuns
       tags: [Runs]
       summary: List Board Runs
-      description: Temporary board-view list of managed runs. This endpoint is UI-oriented and may change as the app evolves.
+      description: Temporary board-view list of managed runs. This endpoint is UI-oriented and may change as the app evolves. Archived runs are hidden by default; pass `include_archived=true` to include them under the `archived` column.
       parameters:
         - $ref: "#/components/parameters/PageLimit"
         - $ref: "#/components/parameters/PageOffset"
+        - $ref: "#/components/parameters/IncludeArchived"
       responses:
         "200":
           description: Paginated list of runs for the board view
@@ -5805,6 +5806,7 @@ components:
         - blocked
         - succeeded
         - failed
+        - archived
 
     BoardColumnDefinition:
       type: object

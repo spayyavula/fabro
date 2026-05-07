@@ -44,6 +44,58 @@ describe("runs route board mapping", () => {
     expect(columns.find((column) => column.id === "blocked")?.items[0]?.question).toBe("Older unresolved question?");
   });
 
+  test("renders an archived column when the response includes one", () => {
+    const columns = buildBoardColumns({
+      columns: [
+        { id: "queued", name: "Queued" },
+        { id: "initializing", name: "Initializing" },
+        { id: "running", name: "Running" },
+        { id: "blocked", name: "Blocked" },
+        { id: "succeeded", name: "Succeeded" },
+        { id: "failed", name: "Failed" },
+        { id: "archived", name: "Archived" },
+      ],
+      data: [
+        boardRun("succeeded-run", "succeeded"),
+        boardRun("archived-run", "archived"),
+      ],
+      meta: { has_more: false },
+    });
+
+    expect(columns.map((column) => column.id)).toEqual([
+      "queued",
+      "initializing",
+      "running",
+      "blocked",
+      "succeeded",
+      "failed",
+      "archived",
+    ]);
+    expect(
+      columns.find((column) => column.id === "archived")?.items.map((item) => item.id),
+    ).toEqual(["archived-run"]);
+    expect(
+      columns.find((column) => column.id === "succeeded")?.items.map((item) => item.id),
+    ).toEqual(["succeeded-run"]);
+  });
+
+  test("omits the archived column when the response does not include it", () => {
+    const columns = buildBoardColumns({
+      columns: [
+        { id: "queued", name: "Queued" },
+        { id: "initializing", name: "Initializing" },
+        { id: "running", name: "Running" },
+        { id: "blocked", name: "Blocked" },
+        { id: "succeeded", name: "Succeeded" },
+        { id: "failed", name: "Failed" },
+      ],
+      data: [boardRun("succeeded-run", "succeeded")],
+      meta: { has_more: false },
+    });
+
+    expect(columns.some((column) => column.id === "archived")).toBe(false);
+  });
+
   test("refreshes for blocked status and interview events", () => {
     expect(shouldRefreshBoardForEvent("run.queued")).toBe(true);
     expect(shouldRefreshBoardForEvent("run.blocked")).toBe(true);

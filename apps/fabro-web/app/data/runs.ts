@@ -48,6 +48,7 @@ export const columnStatuses = [
   BoardColumn.BLOCKED,
   BoardColumn.SUCCEEDED,
   BoardColumn.FAILED,
+  BoardColumn.ARCHIVED,
 ] as const satisfies readonly ColumnStatus[];
 
 export const columnStatusDisplay: Record<ColumnStatus, { label: string; dot: string; text: string }> = {
@@ -57,6 +58,7 @@ export const columnStatusDisplay: Record<ColumnStatus, { label: string; dot: str
   blocked:      { label: "Blocked",      dot: "bg-amber",     text: "text-amber" },
   succeeded:    { label: "Succeeded",    dot: "bg-teal-300",  text: "text-teal-300" },
   failed:       { label: "Failed",       dot: "bg-coral",     text: "text-coral" },
+  archived:     { label: "Archived",     dot: "bg-fg-muted",  text: "text-fg-muted" },
 };
 
 export interface RunWithStatus extends RunItem {

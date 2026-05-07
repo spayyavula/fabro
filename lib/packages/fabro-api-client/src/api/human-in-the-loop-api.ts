@@ -182,7 +182,7 @@ export const HumanInTheLoopApiAxiosParamCreator = function (configuration?: Conf
             };
         },
         /**
-         * Interrupt the active API-mode agent round without sending steering text. The agent keeps its steering lease and waits for a later steer message before starting another LLM round.
+         * Interrupt the active API-mode agent round without sending steering text. The agent keeps its steering lease and waits for a later steer message before starting another LLM round. 
          * @summary Interrupt Run
          * @param {string} id Unique run identifier (ULID).
          * @param {*} [options] Override http request option.
@@ -376,10 +376,10 @@ export const HumanInTheLoopApiAxiosParamCreator = function (configuration?: Conf
             };
         },
         /**
-         * Send a mid-run steering message to the live agent session(s) of a running run. Set `interrupt=true` to atomically interrupt the active API-mode agent round first, then deliver this message as the next user turn. Without `interrupt=true`, the message is appended to the steering queue and may buffer until the next API-mode agent session.
+         * Send a mid-run steering message to the live agent session(s) of a running run. Set `interrupt=true` to atomically interrupt the active API-mode agent round first, then deliver this message as the next user turn. Without `interrupt=true`, the message is appended to the steering queue and may buffer until the next API-mode agent session. 
          * @summary Steer Run
          * @param {string} id Unique run identifier (ULID).
-         * @param {SteerRunRequest} steerRunRequest
+         * @param {SteerRunRequest} steerRunRequest 
          * @param {*} [options] Override http request option.
          * @throws {RequiredError}
          */
@@ -521,7 +521,7 @@ export const HumanInTheLoopApiFp = function(configuration?: Configuration) {
             return (axios, basePath) => createRequestFunction(localVarAxiosArgs, globalAxios, BASE_PATH, configuration)(axios, localVarOperationServerBasePath || basePath);
         },
         /**
-         * Interrupt the active API-mode agent round without sending steering text. The agent keeps its steering lease and waits for a later steer message before starting another LLM round.
+         * Interrupt the active API-mode agent round without sending steering text. The agent keeps its steering lease and waits for a later steer message before starting another LLM round. 
          * @summary Interrupt Run
          * @param {string} id Unique run identifier (ULID).
          * @param {*} [options] Override http request option.
@@ -579,10 +579,10 @@ export const HumanInTheLoopApiFp = function(configuration?: Configuration) {
             return (axios, basePath) => createRequestFunction(localVarAxiosArgs, globalAxios, BASE_PATH, configuration)(axios, localVarOperationServerBasePath || basePath);
         },
         /**
-         * Send a mid-run steering message to the live agent session(s) of a running run. Set `interrupt=true` to atomically interrupt the active API-mode agent round first, then deliver this message as the next user turn. Without `interrupt=true`, the message is appended to the steering queue and may buffer until the next API-mode agent session.
+         * Send a mid-run steering message to the live agent session(s) of a running run. Set `interrupt=true` to atomically interrupt the active API-mode agent round first, then deliver this message as the next user turn. Without `interrupt=true`, the message is appended to the steering queue and may buffer until the next API-mode agent session. 
          * @summary Steer Run
          * @param {string} id Unique run identifier (ULID).
-         * @param {SteerRunRequest} steerRunRequest
+         * @param {SteerRunRequest} steerRunRequest 
          * @param {*} [options] Override http request option.
          * @throws {RequiredError}
          */
@@ -650,7 +650,7 @@ export const HumanInTheLoopApiFactory = function (configuration?: Configuration,
             return localVarFp.getSandboxFile(id, path, options).then((request) => request(axios, basePath));
         },
         /**
-         * Interrupt the active API-mode agent round without sending steering text. The agent keeps its steering lease and waits for a later steer message before starting another LLM round.
+         * Interrupt the active API-mode agent round without sending steering text. The agent keeps its steering lease and waits for a later steer message before starting another LLM round. 
          * @summary Interrupt Run
          * @param {string} id Unique run identifier (ULID).
          * @param {*} [options] Override http request option.
@@ -696,10 +696,10 @@ export const HumanInTheLoopApiFactory = function (configuration?: Configuration,
             return localVarFp.putSandboxFile(id, path, body, options).then((request) => request(axios, basePath));
         },
         /**
-         * Send a mid-run steering message to the live agent session(s) of a running run. Set `interrupt=true` to atomically interrupt the active API-mode agent round first, then deliver this message as the next user turn. Without `interrupt=true`, the message is appended to the steering queue and may buffer until the next API-mode agent session.
+         * Send a mid-run steering message to the live agent session(s) of a running run. Set `interrupt=true` to atomically interrupt the active API-mode agent round first, then deliver this message as the next user turn. Without `interrupt=true`, the message is appended to the steering queue and may buffer until the next API-mode agent session. 
          * @summary Steer Run
          * @param {string} id Unique run identifier (ULID).
-         * @param {SteerRunRequest} steerRunRequest
+         * @param {SteerRunRequest} steerRunRequest 
          * @param {*} [options] Override http request option.
          * @throws {RequiredError}
          */
@@ -762,7 +762,7 @@ export class HumanInTheLoopApi extends BaseAPI {
     }
 
     /**
-     * Interrupt the active API-mode agent round without sending steering text. The agent keeps its steering lease and waits for a later steer message before starting another LLM round.
+     * Interrupt the active API-mode agent round without sending steering text. The agent keeps its steering lease and waits for a later steer message before starting another LLM round. 
      * @summary Interrupt Run
      * @param {string} id Unique run identifier (ULID).
      * @param {*} [options] Override http request option.
@@ -812,10 +812,10 @@ export class HumanInTheLoopApi extends BaseAPI {
     }
 
     /**
-     * Send a mid-run steering message to the live agent session(s) of a running run. Set `interrupt=true` to atomically interrupt the active API-mode agent round first, then deliver this message as the next user turn. Without `interrupt=true`, the message is appended to the steering queue and may buffer until the next API-mode agent session.
+     * Send a mid-run steering message to the live agent session(s) of a running run. Set `interrupt=true` to atomically interrupt the active API-mode agent round first, then deliver this message as the next user turn. Without `interrupt=true`, the message is appended to the steering queue and may buffer until the next API-mode agent session. 
      * @summary Steer Run
      * @param {string} id Unique run identifier (ULID).
-     * @param {SteerRunRequest} steerRunRequest
+     * @param {SteerRunRequest} steerRunRequest 
      * @param {*} [options] Override http request option.
      * @throws {RequiredError}
      */
@@ -836,3 +836,4 @@ export class HumanInTheLoopApi extends BaseAPI {
         return HumanInTheLoopApiFp(this.configuration).submitRunAnswer(id, qid, submitAnswerRequest, options).then((request) => request(this.axios, this.basePath));
     }
 }
+

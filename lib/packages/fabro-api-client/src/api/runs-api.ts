@@ -443,14 +443,15 @@ export const RunsApiAxiosParamCreator = function (configuration?: Configuration)
             };
         },
         /**
-         * Temporary board-view list of managed runs. This endpoint is UI-oriented and may change as the app evolves.
+         * Temporary board-view list of managed runs. This endpoint is UI-oriented and may change as the app evolves. Archived runs are hidden by default; pass `include_archived=true` to include them under the `archived` column.
          * @summary List Board Runs
          * @param {number} [pageLimit] Maximum number of items to return per page.
          * @param {number} [pageOffset] Number of items to skip before returning results.
+         * @param {boolean} [includeArchived] Whether to include archived runs in the response. Defaults to &#x60;false&#x60;.
          * @param {*} [options] Override http request option.
          * @throws {RequiredError}
          */
-        listBoardRuns: async (pageLimit?: number, pageOffset?: number, options: RawAxiosRequestConfig = {}): Promise<RequestArgs> => {
+        listBoardRuns: async (pageLimit?: number, pageOffset?: number, includeArchived?: boolean, options: RawAxiosRequestConfig = {}): Promise<RequestArgs> => {
             const localVarPath = `/api/v1/boards/runs`;
             // use dummy base URL string because the URL constructor only accepts absolute URLs.
             const localVarUrlObj = new URL(localVarPath, DUMMY_BASE_URL);
@@ -475,6 +476,10 @@ export const RunsApiAxiosParamCreator = function (configuration?: Configuration)
 
             if (pageOffset !== undefined) {
                 localVarQueryParameter['page[offset]'] = pageOffset;
+            }
+
+            if (includeArchived !== undefined) {
+                localVarQueryParameter['include_archived'] = includeArchived;
             }
 
             localVarHeaderParameter['Accept'] = 'application/json';
@@ -1206,15 +1211,16 @@ export const RunsApiFp = function(configuration?: Configuration) {
             return (axios, basePath) => createRequestFunction(localVarAxiosArgs, globalAxios, BASE_PATH, configuration)(axios, localVarOperationServerBasePath || basePath);
         },
         /**
-         * Temporary board-view list of managed runs. This endpoint is UI-oriented and may change as the app evolves.
+         * Temporary board-view list of managed runs. This endpoint is UI-oriented and may change as the app evolves. Archived runs are hidden by default; pass `include_archived=true` to include them under the `archived` column.
          * @summary List Board Runs
          * @param {number} [pageLimit] Maximum number of items to return per page.
          * @param {number} [pageOffset] Number of items to skip before returning results.
+         * @param {boolean} [includeArchived] Whether to include archived runs in the response. Defaults to &#x60;false&#x60;.
          * @param {*} [options] Override http request option.
          * @throws {RequiredError}
          */
-        async listBoardRuns(pageLimit?: number, pageOffset?: number, options?: RawAxiosRequestConfig): Promise<(axios?: AxiosInstance, basePath?: string) => AxiosPromise<PaginatedBoardRunList>> {
-            const localVarAxiosArgs = await localVarAxiosParamCreator.listBoardRuns(pageLimit, pageOffset, options);
+        async listBoardRuns(pageLimit?: number, pageOffset?: number, includeArchived?: boolean, options?: RawAxiosRequestConfig): Promise<(axios?: AxiosInstance, basePath?: string) => AxiosPromise<PaginatedBoardRunList>> {
+            const localVarAxiosArgs = await localVarAxiosParamCreator.listBoardRuns(pageLimit, pageOffset, includeArchived, options);
             const localVarOperationServerIndex = configuration?.serverIndex ?? 0;
             const localVarOperationServerBasePath = operationServerMap['RunsApi.listBoardRuns']?.[localVarOperationServerIndex]?.url;
             return (axios, basePath) => createRequestFunction(localVarAxiosArgs, globalAxios, BASE_PATH, configuration)(axios, localVarOperationServerBasePath || basePath);
@@ -1509,15 +1515,16 @@ export const RunsApiFactory = function (configuration?: Configuration, basePath?
             return localVarFp.getRunTimeline(id, options).then((request) => request(axios, basePath));
         },
         /**
-         * Temporary board-view list of managed runs. This endpoint is UI-oriented and may change as the app evolves.
+         * Temporary board-view list of managed runs. This endpoint is UI-oriented and may change as the app evolves. Archived runs are hidden by default; pass `include_archived=true` to include them under the `archived` column.
          * @summary List Board Runs
          * @param {number} [pageLimit] Maximum number of items to return per page.
          * @param {number} [pageOffset] Number of items to skip before returning results.
+         * @param {boolean} [includeArchived] Whether to include archived runs in the response. Defaults to &#x60;false&#x60;.
          * @param {*} [options] Override http request option.
          * @throws {RequiredError}
          */
-        listBoardRuns(pageLimit?: number, pageOffset?: number, options?: RawAxiosRequestConfig): AxiosPromise<PaginatedBoardRunList> {
-            return localVarFp.listBoardRuns(pageLimit, pageOffset, options).then((request) => request(axios, basePath));
+        listBoardRuns(pageLimit?: number, pageOffset?: number, includeArchived?: boolean, options?: RawAxiosRequestConfig): AxiosPromise<PaginatedBoardRunList> {
+            return localVarFp.listBoardRuns(pageLimit, pageOffset, includeArchived, options).then((request) => request(axios, basePath));
         },
         /**
          * Returns durable run summaries from the backing store, including runs persisted before the current server boot. Archived runs are hidden by default; pass `include_archived=true` to include them in the response.
@@ -1774,15 +1781,16 @@ export class RunsApi extends BaseAPI {
     }
 
     /**
-     * Temporary board-view list of managed runs. This endpoint is UI-oriented and may change as the app evolves.
+     * Temporary board-view list of managed runs. This endpoint is UI-oriented and may change as the app evolves. Archived runs are hidden by default; pass `include_archived=true` to include them under the `archived` column.
      * @summary List Board Runs
      * @param {number} [pageLimit] Maximum number of items to return per page.
      * @param {number} [pageOffset] Number of items to skip before returning results.
+     * @param {boolean} [includeArchived] Whether to include archived runs in the response. Defaults to &#x60;false&#x60;.
      * @param {*} [options] Override http request option.
      * @throws {RequiredError}
      */
-    public listBoardRuns(pageLimit?: number, pageOffset?: number, options?: RawAxiosRequestConfig) {
-        return RunsApiFp(this.configuration).listBoardRuns(pageLimit, pageOffset, options).then((request) => request(this.axios, this.basePath));
+    public listBoardRuns(pageLimit?: number, pageOffset?: number, includeArchived?: boolean, options?: RawAxiosRequestConfig) {
+        return RunsApiFp(this.configuration).listBoardRuns(pageLimit, pageOffset, includeArchived, options).then((request) => request(this.axios, this.basePath));
     }
 
     /**

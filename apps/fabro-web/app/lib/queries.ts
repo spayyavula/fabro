@@ -63,8 +63,11 @@ export function useSystemInfo() {
   );
 }
 
-export function useBoardsRuns() {
-  return useSWR<BoardRunsEnvelope>(queryKeys.boards.runs(), apiPaginatedFetcher);
+export function useBoardsRuns(includeArchived: boolean = false) {
+  return useSWR<BoardRunsEnvelope>(
+    queryKeys.boards.runs(includeArchived),
+    apiPaginatedFetcher,
+  );
 }
 
 export function useRun(id: string | undefined) {

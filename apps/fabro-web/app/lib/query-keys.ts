@@ -24,7 +24,10 @@ export const queryKeys = {
     attach: () => "/api/v1/attach",
   },
   boards: {
-    runs: () => "/api/v1/boards/runs",
+    runs: (includeArchived = false) =>
+      withQuery("/api/v1/boards/runs", {
+        include_archived: includeArchived ? "true" : null,
+      }),
   },
   runs: {
     detail: (id: string) => `/api/v1/runs/${pathSegment(id)}`,

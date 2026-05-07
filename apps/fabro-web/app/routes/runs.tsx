@@ -1,6 +1,6 @@
 import { useState, useCallback, useEffect, useMemo, useRef } from "react";
 import { Link } from "react-router";
-import { ChevronDownIcon, CommandLineIcon, MagnifyingGlassIcon } from "@heroicons/react/24/outline";
+import { ArchiveBoxIcon, ChevronDownIcon, CommandLineIcon, MagnifyingGlassIcon } from "@heroicons/react/24/outline";
 import { EllipsisVerticalIcon } from "@heroicons/react/20/solid";
 import { Menu, MenuButton, MenuItem, MenuItems } from "@headlessui/react";
 import { useSWRConfig } from "swr";
@@ -50,6 +50,7 @@ const columnStyles: Record<ColumnStatus, ColumnStyle> = {
   blocked:      { iconType: "branch", actions: ["Answer Question"] },
   succeeded:    { iconType: "pr",     actions: [] },
   failed:       { iconType: "branch", actions: [] },
+  archived:     { iconType: "branch", actions: [] },
 };
 
 const defaultColumnStyle: ColumnStyle = { iconType: "branch", actions: [] };
@@ -71,18 +72,20 @@ type Column = {
   items: RunItem[];
 };
 
-function buildSkeletonColumns(): Column[] {
-  return columnStatuses.map((id) => {
-    const colors = columnStatusDisplay[id];
-    return {
-      id,
-      name: colors.label,
-      dot: colors.dot,
-      text: colors.text,
-      ...(columnStyles[id] ?? defaultColumnStyle),
-      items: [],
-    };
-  });
+function buildSkeletonColumns(includeArchived: boolean): Column[] {
+  return columnStatuses
+    .filter((id) => includeArchived || id !== "archived")
+    .map((id) => {
+      const colors = columnStatusDisplay[id];
+      return {
+        id,
+        name: colors.label,
+        dot: colors.dot,
+        text: colors.text,
+        ...(columnStyles[id] ?? defaultColumnStyle),
+        items: [],
+      };
+    });
 }
 
 export function buildBoardColumns(response: BoardRunsResponse): Column[] {
@@ -750,7 +753,8 @@ function RunsLandingEmpty({
 }
 
 export default function Runs() {
-  const boardRuns = useBoardsRuns();
+  const [includeArchived, setIncludeArchived] = useState(false);
+  const boardRuns = useBoardsRuns(includeArchived);
   const authConfig = useAuthConfig();
   const systemInfo = useSystemInfo();
   const isLandingReady =
@@ -758,8 +762,11 @@ export default function Runs() {
     authConfig.data !== undefined &&
     systemInfo.data !== undefined;
   const initialColumns = useMemo(
-    () => boardRuns.data ? buildBoardColumns(boardRuns.data) : buildSkeletonColumns(),
-    [boardRuns.data],
+    () =>
+      boardRuns.data
+        ? buildBoardColumns(boardRuns.data)
+        : buildSkeletonColumns(includeArchived),
+    [boardRuns.data, includeArchived],
   );
   const hasGitHubAuth = authConfig.data?.methods.includes("github") === true;
   const serverUrl = systemInfo.data?.server_url;
@@ -851,6 +858,16 @@ export default function Runs() {
             </select>
             <ChevronDownIcon className="pointer-events-none absolute right-2 top-1/2 size-4 -translate-y-1/2 text-fg-muted" />
           </div>
+          <button
+            type="button"
+            onClick={() => setIncludeArchived((v) => !v)}
+            aria-pressed={includeArchived}
+            title={includeArchived ? "Hide archived runs" : "Show archived runs"}
+            className={`inline-flex items-center gap-1.5 rounded-md border border-line bg-panel/80 px-3 py-2 text-xs font-medium transition-colors ${includeArchived ? "text-teal-500" : "text-fg-muted hover:text-fg-3"}`}
+          >
+            <ArchiveBoxIcon className="size-4" aria-hidden="true" />
+            <span>Show archived</span>
+          </button>
           <div role="group" aria-label="Run list view" className="flex rounded-md border border-line bg-panel/80 p-0.5">
             <button
               type="button"

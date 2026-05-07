@@ -8283,6 +8283,139 @@ async fn boards_runs_excludes_removing_status() {
 }
 
 #[tokio::test]
+async fn boards_runs_excludes_archived_by_default() {
+    let state = test_app_state();
+    let app = crate::test_support::build_test_router(Arc::clone(&state));
+    let run_id = fixtures::RUN_1;
+
+    create_durable_run_with_events(&state, run_id, &[
+        workflow_event::Event::RunSubmitted {
+            definition_blob: None,
+        },
+        workflow_event::Event::RunStarting,
+        workflow_event::Event::RunRunning,
+        workflow_event::Event::WorkflowRunCompleted {
+            duration_ms:          1000,
+            artifact_count:       0,
+            status:               "succeeded".to_string(),
+            reason:               SuccessReason::Completed,
+            total_usd_micros:     None,
+            final_git_commit_sha: None,
+            final_patch:          None,
+            billing:              None,
+        },
+        workflow_event::Event::RunArchived { actor: None },
+    ])
+    .await;
+
+    let req = Request::builder()
+        .method("GET")
+        .uri(api("/boards/runs"))
+        .body(Body::empty())
+        .unwrap();
+    let response = app.oneshot(req).await.unwrap();
+    let body = response_json!(response, StatusCode::OK).await;
+    let data = body["data"].as_array().expect("data should be array");
+    assert!(
+        !data
+            .iter()
+            .any(|i| i["run_id"].as_str() == Some(&run_id.to_string())),
+        "archived run should be hidden when include_archived is unset",
+    );
+    let columns = body["columns"].as_array().expect("columns should be array");
+    assert!(
+        !columns.iter().any(|c| c["id"].as_str() == Some("archived")),
+        "archived column should not appear in default response",
+    );
+}
+
+#[tokio::test]
+async fn boards_runs_includes_archived_when_flag_set() {
+    let state = test_app_state();
+    let app = crate::test_support::build_test_router(Arc::clone(&state));
+    let archived_id = fixtures::RUN_1;
+    let succeeded_id = fixtures::RUN_2;
+
+    create_durable_run_with_events(&state, archived_id, &[
+        workflow_event::Event::RunSubmitted {
+            definition_blob: None,
+        },
+        workflow_event::Event::RunStarting,
+        workflow_event::Event::RunRunning,
+        workflow_event::Event::WorkflowRunCompleted {
+            duration_ms:          1000,
+            artifact_count:       0,
+            status:               "succeeded".to_string(),
+            reason:               SuccessReason::Completed,
+            total_usd_micros:     None,
+            final_git_commit_sha: None,
+            final_patch:          None,
+            billing:              None,
+        },
+        workflow_event::Event::RunArchived { actor: None },
+    ])
+    .await;
+    create_durable_run_with_events(&state, succeeded_id, &[
+        workflow_event::Event::RunSubmitted {
+            definition_blob: None,
+        },
+        workflow_event::Event::RunStarting,
+        workflow_event::Event::RunRunning,
+        workflow_event::Event::WorkflowRunCompleted {
+            duration_ms:          1000,
+            artifact_count:       0,
+            status:               "succeeded".to_string(),
+            reason:               SuccessReason::Completed,
+            total_usd_micros:     None,
+            final_git_commit_sha: None,
+            final_patch:          None,
+            billing:              None,
+        },
+    ])
+    .await;
+
+    let req = Request::builder()
+        .method("GET")
+        .uri(api("/boards/runs?include_archived=true"))
+        .body(Body::empty())
+        .unwrap();
+    let response = app.oneshot(req).await.unwrap();
+    let body = response_json!(response, StatusCode::OK).await;
+    let data = body["data"].as_array().expect("data should be array");
+
+    let archived_item = data
+        .iter()
+        .find(|i| i["run_id"].as_str() == Some(&archived_id.to_string()))
+        .expect("archived run should appear when include_archived=true");
+    assert_eq!(archived_item["column"].as_str().unwrap(), "archived");
+    assert_eq!(archived_item["status"]["kind"].as_str().unwrap(), "archived");
+
+    let succeeded_item = data
+        .iter()
+        .find(|i| i["run_id"].as_str() == Some(&succeeded_id.to_string()))
+        .expect("non-archived run should still appear");
+    assert_eq!(succeeded_item["column"].as_str().unwrap(), "succeeded");
+
+    let columns = body["columns"].as_array().expect("columns should be array");
+    let column_ids: Vec<_> = columns
+        .iter()
+        .map(|c| c["id"].as_str().unwrap().to_string())
+        .collect();
+    assert_eq!(
+        column_ids,
+        vec![
+            "queued",
+            "initializing",
+            "running",
+            "blocked",
+            "succeeded",
+            "failed",
+            "archived",
+        ],
+    );
+}
+
+#[tokio::test]
 async fn get_run_exposes_canonical_operator_statuses() {
     let state = test_app_state();
     let app = crate::test_support::build_test_router(Arc::clone(&state));
