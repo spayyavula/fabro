@@ -333,7 +333,7 @@ export default function RunDetail({ params }: { params: { id: string } }) {
         </nav>
       </div>
 
-      <div className={fullHeight ? "mt-6 min-h-0 flex-1" : "mt-6"}>
+      <div className={fullHeight ? "mt-6 flex min-h-0 flex-1 flex-col" : "mt-6"}>
         <Outlet />
       </div>
 

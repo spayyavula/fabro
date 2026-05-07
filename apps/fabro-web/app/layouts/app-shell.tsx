@@ -83,7 +83,7 @@ export default function AppShell() {
     <div
       className={classNames(
         "isolate",
-        fullHeight ? "flex min-h-dvh flex-col" : "min-h-full",
+        fullHeight ? "flex h-dvh flex-col" : "min-h-full",
       )}
     >
       <Disclosure

@@ -426,7 +426,7 @@ export default function RunStages() {
   const runStart = runQuery.data?.created_at;
 
   return (
-    <div className="-mt-6 flex h-full min-h-0">
+    <div className="-mt-6 flex min-h-0 flex-1">
       <div className="shrink-0 pb-6 pr-3 pt-6">
         <StageSidebar stages={stages} runId={id} selectedStageId={selectedStage.id} />
       </div>

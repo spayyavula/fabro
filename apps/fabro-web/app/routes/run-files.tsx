@@ -483,7 +483,7 @@ export default function RunFiles() {
 
   if (files.length === 0) {
     return (
-      <div ref={containerRef} className="flex h-full min-h-0 flex-col gap-4">
+      <div ref={containerRef} className="flex min-h-0 flex-1 flex-col gap-4">
         {toolbar}
         {meta.degraded ? (
           <DegradedBanner reason={meta.degraded_reason} />
@@ -500,7 +500,7 @@ export default function RunFiles() {
   }
 
   return (
-    <div ref={containerRef} className="flex h-full min-h-0 flex-col gap-4">
+    <div ref={containerRef} className="flex min-h-0 flex-1 flex-col gap-4">
       <div className="shrink-0 space-y-4">
         {toolbar}
         {revalidationError ? (
