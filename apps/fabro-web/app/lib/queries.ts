@@ -162,6 +162,18 @@ export function fetchRunCommandLog(
   );
 }
 
+export function useRunStageLog(
+  id: string | undefined,
+  stageId: string | undefined,
+  stream: CommandOutputStream,
+  enabled: boolean,
+) {
+  return useSWR<CommandLogResponse>(
+    enabled && id && stageId ? queryKeys.runs.stageLog(id, stageId, stream) : null,
+    apiFetcher,
+  );
+}
+
 export function useWorkflows() {
   return useSWR<PaginatedWorkflowListResponse | null>(
     queryKeys.workflows.list(),

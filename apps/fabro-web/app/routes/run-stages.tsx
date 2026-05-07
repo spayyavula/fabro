@@ -20,11 +20,17 @@ import { Marked } from "marked";
 import { StageSidebar } from "../components/stage-sidebar";
 import type { Stage } from "../components/stage-sidebar";
 import { EmptyState } from "../components/state";
-import { useRun, useRunStageEvents, useRunStages } from "../lib/queries";
+import { formatBytes } from "../lib/format";
+import {
+  useRun,
+  useRunStageEvents,
+  useRunStageLog,
+  useRunStages,
+} from "../lib/queries";
 import { STAGE_ACTIVITY_EVENT_TYPES, type StageActivityEventType } from "../lib/run-events";
 import { mapRunStagesToSidebarStages } from "../lib/stage-sidebar";
 import { getNumber, getString, type UnknownRecord } from "../lib/unknown";
-import type { EventEnvelope } from "@qltysh/fabro-api-client";
+import type { CommandOutputStream, EventEnvelope } from "@qltysh/fabro-api-client";
 
 export const handle = { wide: true, fullHeight: true };
 
@@ -32,7 +38,19 @@ type TurnType =
   | { kind: "system"; ts: string; content: string }
   | { kind: "assistant"; ts: string; content: string; inputTokens: number; outputTokens: number }
   | { kind: "tool"; ts: string; toolName: string; input: string; result: string; isError: boolean; durationMs: number }
-  | { kind: "command"; ts: string; script: string; running: boolean; exitCode: number | null; durationMs: number };
+  | {
+      kind: "command";
+      ts: string;
+      script: string;
+      running: boolean;
+      exitCode: number | null;
+      durationMs: number;
+      stdoutBytes: number;
+      stderrBytes: number;
+    };
+
+type CommandTurn = Extract<TurnType, { kind: "command" }>;
+type StageKind = "agent" | "command";
 
 const STAGE_ACTIVITY_EVENT_SET = new Set<string>(STAGE_ACTIVITY_EVENT_TYPES);
 
@@ -72,10 +90,10 @@ function debugCategoryTone(category: string): string {
 const EVENTS_TABS = ["transcript", "debug"] as const;
 type EventsTab = (typeof EVENTS_TABS)[number];
 
-const EVENTS_TAB_LABEL: Record<EventsTab, string> = {
-  transcript: "Transcript",
-  debug: "Debug",
-};
+function eventsTabLabel(tab: EventsTab, stageKind: StageKind): string {
+  if (tab === "debug") return "Debug";
+  return stageKind === "command" ? "Logs" : "Transcript";
+}
 
 function assertNever(value: never): never {
   throw new Error(`Unhandled stage activity event type: ${value}`);
@@ -174,6 +192,8 @@ export function eventsToActivity(events: EventEnvelope[], stageId: string): Turn
           running: false,
           exitCode: getNumber(props, "exit_code") ?? null,
           durationMs: getNumber(props, "duration_ms") ?? 0,
+          stdoutBytes: getNumber(props, "stdout_bytes") ?? 0,
+          stderrBytes: getNumber(props, "stderr_bytes") ?? 0,
         });
         pendingCommand = undefined;
         break;
@@ -191,10 +211,21 @@ export function eventsToActivity(events: EventEnvelope[], stageId: string): Turn
       running: true,
       exitCode: null,
       durationMs: 0,
+      stdoutBytes: 0,
+      stderrBytes: 0,
     });
   }
 
   return turns;
+}
+
+export function turnsToStageKind(turns: TurnType[]): StageKind {
+  let hasCommand = false;
+  for (const t of turns) {
+    if (t.kind === "assistant" || t.kind === "tool") return "agent";
+    if (t.kind === "command") hasCommand = true;
+  }
+  return hasCommand ? "command" : "agent";
 }
 
 const STAGE_MODEL_EVENT_NAMES = new Set([
@@ -614,6 +645,157 @@ function EventDetails({ turn, runStart }: { turn: TurnType; runStart: string | u
   );
 }
 
+function decodeBase64Utf8(b64: string): string {
+  const binary = atob(b64);
+  const bytes = new Uint8Array(binary.length);
+  for (let i = 0; i < binary.length; i += 1) bytes[i] = binary.charCodeAt(i);
+  return new TextDecoder("utf-8", { fatal: false }).decode(bytes);
+}
+
+function LogStream({
+  runId,
+  stageId,
+  stream,
+  label,
+  byteCount,
+  enabled,
+  tone,
+}: {
+  runId: string;
+  stageId: string;
+  stream: CommandOutputStream;
+  label: string;
+  byteCount: number;
+  enabled: boolean;
+  tone?: "stderr";
+}) {
+  const { data, error, isLoading } = useRunStageLog(runId, stageId, stream, enabled && byteCount > 0);
+  const text = useMemo(() => {
+    if (!data?.bytes_base64) return "";
+    try {
+      return decodeBase64Utf8(data.bytes_base64);
+    } catch {
+      return "";
+    }
+  }, [data]);
+  const truncated =
+    data && data.total_bytes > data.next_offset ? data.total_bytes - data.next_offset : 0;
+
+  return (
+    <section>
+      <header className="mb-1 flex items-baseline justify-between gap-2">
+        <h3 className="text-xs font-medium uppercase tracking-wider text-fg-muted">
+          {label}
+        </h3>
+        {byteCount > 0 && (
+          <span className="font-mono text-[11px] tabular-nums text-fg-muted">
+            {formatBytes(byteCount)}
+          </span>
+        )}
+      </header>
+      <pre
+        className={`overflow-x-auto whitespace-pre-wrap rounded-md bg-overlay-strong p-3 font-mono text-xs leading-relaxed ${
+          tone === "stderr" ? "text-coral" : "text-fg-3"
+        }`}
+      >
+        {byteCount === 0 ? (
+          <span className="text-fg-muted">empty</span>
+        ) : isLoading && !data ? (
+          <span className="text-fg-muted">loading…</span>
+        ) : error ? (
+          <span className="text-coral">Failed to load {stream}.</span>
+        ) : (
+          text || <span className="text-fg-muted">empty</span>
+        )}
+      </pre>
+      {truncated > 0 && (
+        <p className="mt-1 text-[11px] text-fg-muted">
+          Showing first {formatBytes(data!.next_offset)} of {formatBytes(data!.total_bytes)}.
+        </p>
+      )}
+    </section>
+  );
+}
+
+function CommandStatus({ turn }: { turn: CommandTurn }) {
+  const exitTone =
+    turn.exitCode == null
+      ? "text-fg-muted"
+      : turn.exitCode === 0
+        ? "text-mint"
+        : "text-coral";
+  return (
+    <span className="ml-auto inline-flex items-center gap-x-3 text-xs">
+      {turn.running ? (
+        <span className="inline-flex items-center gap-1.5 text-amber">
+          <span className="size-1.5 animate-pulse rounded-full bg-amber" />
+          Running…
+        </span>
+      ) : (
+        <span className={`font-mono tabular-nums ${exitTone}`}>
+          exit {turn.exitCode ?? "?"}
+        </span>
+      )}
+      {turn.durationMs > 0 && (
+        <span className="font-mono tabular-nums text-fg-muted">
+          {formatDurationMs(turn.durationMs)}
+        </span>
+      )}
+    </span>
+  );
+}
+
+function CommandScript({ script }: { script: string }) {
+  return (
+    <section>
+      <h3 className="mb-1 text-xs font-medium uppercase tracking-wider text-fg-muted">
+        Command
+      </h3>
+      <pre className="overflow-x-auto whitespace-pre-wrap rounded-md bg-overlay-strong p-3 font-mono text-xs leading-relaxed text-fg-3">
+        {script || <span className="text-fg-muted">empty</span>}
+      </pre>
+    </section>
+  );
+}
+
+function CommandLogs({
+  runId,
+  stageId,
+  turn,
+}: {
+  runId: string;
+  stageId: string;
+  turn: CommandTurn | null;
+}) {
+  if (!turn) {
+    return (
+      <div className="px-2 py-6 text-sm text-fg-muted">No command output yet.</div>
+    );
+  }
+  return (
+    <div className="space-y-5 pl-3 pr-4 sm:pr-6 lg:pr-8">
+      <CommandScript script={turn.script} />
+      <LogStream
+        runId={runId}
+        stageId={stageId}
+        stream="stdout"
+        label="Stdout"
+        byteCount={turn.stdoutBytes}
+        enabled={!turn.running}
+      />
+      <LogStream
+        runId={runId}
+        stageId={stageId}
+        stream="stderr"
+        label="Stderr"
+        byteCount={turn.stderrBytes}
+        enabled={!turn.running}
+        tone="stderr"
+      />
+    </div>
+  );
+}
+
 function DetailsPanel({
   title,
   isOpen,
@@ -711,9 +893,11 @@ function DebugEventDetailsPanel({
 
 function EventsTabToggle({
   tab,
+  stageKind,
   onTabChange,
 }: {
   tab: EventsTab;
+  stageKind: StageKind;
   onTabChange: (tab: EventsTab) => void;
 }) {
   return (
@@ -736,7 +920,7 @@ function EventsTabToggle({
                 : "text-fg-muted hover:text-fg-2"
             }`}
           >
-            {EVENTS_TAB_LABEL[value]}
+            {eventsTabLabel(value, stageKind)}
           </button>
         );
       })}
@@ -832,6 +1016,8 @@ function SearchInput({
 
 function EventsToolbar({
   tab,
+  stageKind,
+  commandTurn,
   onTabChange,
   selectedKinds,
   onKindsChange,
@@ -845,6 +1031,8 @@ function EventsToolbar({
   model,
 }: {
   tab: EventsTab;
+  stageKind: StageKind;
+  commandTurn: CommandTurn | null;
   onTabChange: (tab: EventsTab) => void;
   selectedKinds: EventKind[];
   onKindsChange: (kinds: EventKind[]) => void;
@@ -857,13 +1045,16 @@ function EventsToolbar({
   totalCount: number;
   model: string | null;
 }) {
+  const showFilters = !(tab === "transcript" && stageKind === "command");
   const transcriptAllSelected = selectedKinds.length === EVENT_KINDS.length;
   const debugAllSelected =
     selectedDebugCategories.length === 0 ||
     selectedDebugCategories.length === availableDebugCategories.length;
-  const isFiltering = tab === "transcript"
-    ? !transcriptAllSelected || search.length > 0
-    : !debugAllSelected || search.length > 0;
+  const isFiltering =
+    showFilters &&
+    (tab === "transcript"
+      ? !transcriptAllSelected || search.length > 0
+      : !debugAllSelected || search.length > 0);
 
   function clearFilters() {
     if (tab === "transcript") onKindsChange([...EVENT_KINDS]);
@@ -873,35 +1064,37 @@ function EventsToolbar({
 
   return (
     <div className="flex flex-wrap items-center gap-x-3 gap-y-2 pb-3">
-      <EventsTabToggle tab={tab} onTabChange={onTabChange} />
-      <div className="flex flex-1 flex-wrap items-center gap-2">
-        {tab === "transcript" ? (
-          <MultiSelectFilter<EventKind>
-            selected={selectedKinds}
-            options={EVENT_KINDS}
-            labelOf={(k) => EVENT_KIND_LABEL[k]}
-            onChange={onKindsChange}
-          />
-        ) : (
-          <MultiSelectFilter<string>
-            selected={selectedDebugCategories}
-            options={availableDebugCategories}
-            labelOf={debugCategoryLabel}
-            onChange={onDebugCategoriesChange}
-            emptyMeansAll
-          />
-        )}
-        <SearchInput value={search} onChange={onSearchChange} />
-        {isFiltering && (
-          <button
-            type="button"
-            onClick={clearFilters}
-            className="rounded px-2 py-1 text-xs text-fg-muted transition-colors hover:bg-overlay hover:text-fg-2 focus-visible:outline-2 focus-visible:outline-offset-1 focus-visible:outline-teal-500"
-          >
-            Clear
-          </button>
-        )}
-      </div>
+      <EventsTabToggle tab={tab} stageKind={stageKind} onTabChange={onTabChange} />
+      {showFilters && (
+        <div className="flex flex-1 flex-wrap items-center gap-2">
+          {tab === "transcript" ? (
+            <MultiSelectFilter<EventKind>
+              selected={selectedKinds}
+              options={EVENT_KINDS}
+              labelOf={(k) => EVENT_KIND_LABEL[k]}
+              onChange={onKindsChange}
+            />
+          ) : (
+            <MultiSelectFilter<string>
+              selected={selectedDebugCategories}
+              options={availableDebugCategories}
+              labelOf={debugCategoryLabel}
+              onChange={onDebugCategoriesChange}
+              emptyMeansAll
+            />
+          )}
+          <SearchInput value={search} onChange={onSearchChange} />
+          {isFiltering && (
+            <button
+              type="button"
+              onClick={clearFilters}
+              className="rounded px-2 py-1 text-xs text-fg-muted transition-colors hover:bg-overlay hover:text-fg-2 focus-visible:outline-2 focus-visible:outline-offset-1 focus-visible:outline-teal-500"
+            >
+              Clear
+            </button>
+          )}
+        </div>
+      )}
       {isFiltering && totalCount > 0 && (
         <span className="text-xs tabular-nums text-fg-muted">
           {filteredCount.toLocaleString()} of {totalCount.toLocaleString()} events
@@ -909,13 +1102,16 @@ function EventsToolbar({
       )}
       {model && (
         <span
-          className="inline-flex items-center gap-1.5 text-xs text-fg-muted"
+          className={`inline-flex items-center gap-1.5 text-xs text-fg-muted ${
+            showFilters ? "" : "ml-auto"
+          }`}
           title="LLM model used for this stage"
         >
           <CpuChipIcon className="size-3.5" aria-hidden="true" />
           <span className="font-mono">{model}</span>
         </span>
       )}
+      {!showFilters && commandTurn && <CommandStatus turn={commandTurn} />}
     </div>
   );
 }
@@ -939,6 +1135,14 @@ export default function RunStages() {
         : [],
     [stageEventsQuery.data, selectedStageId],
   );
+  const stageKind = useMemo(() => turnsToStageKind(turns), [turns]);
+  const commandTurn = useMemo<CommandTurn | null>(() => {
+    for (let i = turns.length - 1; i >= 0; i -= 1) {
+      const t = turns[i];
+      if (t.kind === "command") return t;
+    }
+    return null;
+  }, [turns]);
 
   const [openIndex, setOpenIndex] = useState<number | null>(null);
   const [openDebugSeq, setOpenDebugSeq] = useState<number | null>(null);
@@ -1043,6 +1247,8 @@ export default function RunStages() {
           <div className="pl-3 pr-4 sm:pr-6 lg:pr-8">
             <EventsToolbar
               tab={tab}
+              stageKind={stageKind}
+              commandTurn={commandTurn}
               onTabChange={setTab}
               selectedKinds={selectedKinds}
               onKindsChange={setSelectedKinds}
@@ -1059,7 +1265,9 @@ export default function RunStages() {
         </div>
         <div className="min-h-0 flex-1 overflow-y-auto pb-6 pt-2">
           {tab === "transcript" ? (
-            turns.length > 0 && filteredTurns.length === 0 ? (
+            stageKind === "command" ? (
+              <CommandLogs runId={id} stageId={selectedStage.id} turn={commandTurn} />
+            ) : turns.length > 0 && filteredTurns.length === 0 ? (
               <div className="px-2 py-6 text-sm text-fg-muted">
                 No events match these filters.
               </div>
@@ -1093,11 +1301,13 @@ export default function RunStages() {
       </div>
 
       {tab === "transcript" ? (
-        <EventDetailsPanel
-          turn={openTurn}
-          runStart={runStart}
-          onClose={() => setOpenIndex(null)}
-        />
+        stageKind === "command" ? null : (
+          <EventDetailsPanel
+            turn={openTurn}
+            runStart={runStart}
+            onClose={() => setOpenIndex(null)}
+          />
+        )
       ) : (
         <DebugEventDetailsPanel
           event={openDebugEvent}

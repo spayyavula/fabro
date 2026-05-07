@@ -1,7 +1,7 @@
 import { describe, expect, test } from "bun:test";
 import type { EventEnvelope } from "@qltysh/fabro-api-client";
 
-import { eventsToActivity, extractStageModel } from "./run-stages";
+import { eventsToActivity, extractStageModel, turnsToStageKind } from "./run-stages";
 
 function envelope(seq: number, partial: Partial<EventEnvelope>): EventEnvelope {
   return {
@@ -79,8 +79,10 @@ describe("eventsToActivity", () => {
         event: "command.completed",
         node_id: "fmt",
         properties: {
-          stdout: "ok",
-          stderr: "",
+          stdout: "blob://sha256/abc",
+          stderr: "blob://sha256/def",
+          stdout_bytes: 42,
+          stderr_bytes: 0,
           exit_code: 0,
           duration_ms: 12,
           termination: "exited",
@@ -94,6 +96,8 @@ describe("eventsToActivity", () => {
       kind: "command",
       script: "cargo fmt",
       running: false,
+      stdoutBytes: 42,
+      stderrBytes: 0,
     });
   });
 
@@ -249,5 +253,51 @@ describe("eventsToActivity", () => {
     if (turns[0].kind === "assistant") {
       expect(turns[0].content).toBe("signal");
     }
+  });
+});
+
+describe("turnsToStageKind", () => {
+  test("classifies a stage with only command events as command", () => {
+    const events: EventEnvelope[] = [
+      envelope(1, {
+        event: "stage.prompt",
+        node_id: "fmt",
+        properties: { text: "run formatter" },
+      }),
+      envelope(2, {
+        event: "command.started",
+        node_id: "fmt",
+        properties: { script: "cargo fmt", language: "shell" },
+      }),
+      envelope(3, {
+        event: "command.completed",
+        node_id: "fmt",
+        properties: {
+          stdout: "blob://sha256/abc",
+          stderr: "blob://sha256/def",
+          exit_code: 0,
+          duration_ms: 5,
+          termination: "exited",
+        },
+      }),
+    ];
+
+    expect(turnsToStageKind(eventsToActivity(events, "fmt"))).toBe("command");
+  });
+
+  test("classifies a stage with agent events as agent", () => {
+    const events: EventEnvelope[] = [
+      envelope(1, {
+        event: "agent.message",
+        node_id: "simplify",
+        properties: { text: "thinking…" },
+      }),
+    ];
+
+    expect(turnsToStageKind(eventsToActivity(events, "simplify"))).toBe("agent");
+  });
+
+  test("defaults to agent for empty turns", () => {
+    expect(turnsToStageKind([])).toBe("agent");
   });
 });
