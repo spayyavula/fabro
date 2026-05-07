@@ -724,7 +724,7 @@ function EventsToolbar({
   }
 
   return (
-    <div className="relative flex flex-wrap items-center gap-x-3 gap-y-2 pb-3 before:pointer-events-none before:absolute before:bottom-0 before:left-1/2 before:h-px before:w-screen before:-translate-x-1/2 before:bg-line">
+    <div className="flex flex-wrap items-center gap-x-3 gap-y-2 pb-3">
       <EventsTabToggle tab={tab} onTabChange={onTabChange} />
       {showTranscriptControls ? (
         <div className="flex flex-1 flex-wrap items-center gap-2">
@@ -809,7 +809,7 @@ export default function RunStages() {
   const runStart = runQuery.data?.created_at;
 
   return (
-    <div className="-mt-6 flex min-h-0 flex-1">
+    <div className="-mr-4 -mt-6 flex min-h-0 flex-1 sm:-mr-6 lg:-mr-8">
       <div className="shrink-0 pb-6 pr-3 pt-6">
         <StageSidebar stages={stages} runId={id} selectedStageId={selectedStage.id} />
       </div>
@@ -821,20 +821,22 @@ export default function RunStages() {
         />
       </div>
 
-      <div className="flex min-h-0 min-w-0 flex-1 flex-col pl-3 pt-3">
-        <div className="shrink-0">
-          <EventsToolbar
-            tab={tab}
-            onTabChange={setTab}
-            selectedKinds={selectedKinds}
-            onKindsChange={setSelectedKinds}
-            search={search}
-            onSearchChange={setSearch}
-            filteredCount={filteredTurns.length}
-            totalCount={turns.length}
-          />
+      <div className="flex min-h-0 min-w-0 flex-1 flex-col pt-3">
+        <div className="shrink-0 border-b border-line">
+          <div className="pl-3 pr-4 sm:pr-6 lg:pr-8">
+            <EventsToolbar
+              tab={tab}
+              onTabChange={setTab}
+              selectedKinds={selectedKinds}
+              onKindsChange={setSelectedKinds}
+              search={search}
+              onSearchChange={setSearch}
+              filteredCount={filteredTurns.length}
+              totalCount={turns.length}
+            />
+          </div>
         </div>
-        <div className="min-h-0 flex-1 overflow-y-auto pb-6 pt-2">
+        <div className="min-h-0 flex-1 overflow-y-auto pb-6 pl-3 pr-4 pt-2 sm:pr-6 lg:pr-8">
           {tab === "transcript" ? (
             turns.length > 0 && filteredTurns.length === 0 ? (
               <div className="px-2 py-6 text-sm text-fg-muted">
