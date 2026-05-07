@@ -10,6 +10,7 @@ import { XMarkIcon } from "@heroicons/react/24/outline";
 import {
   CheckIcon,
   ChevronUpDownIcon,
+  CpuChipIcon,
   FunnelIcon,
   MagnifyingGlassIcon,
 } from "@heroicons/react/16/solid";
@@ -193,6 +194,26 @@ export function eventsToActivity(events: EventEnvelope[], stageId: string): Turn
   }
 
   return turns;
+}
+
+const STAGE_MODEL_EVENT_NAMES = new Set([
+  "stage.prompt",
+  "agent.session.activated",
+  "agent.cli.started",
+]);
+
+export function extractStageModel(
+  events: EventEnvelope[],
+  stageId: string,
+): string | null {
+  let model: string | null = null;
+  for (const e of events) {
+    if (activityEventStageId(e) !== stageId) continue;
+    if (!e.event || !STAGE_MODEL_EVENT_NAMES.has(e.event)) continue;
+    const candidate = getString(e.properties ?? {}, "model");
+    if (candidate) model = candidate;
+  }
+  return model;
 }
 
 function turnLabel(turn: TurnType): string {
@@ -816,6 +837,7 @@ function EventsToolbar({
   onSearchChange,
   filteredCount,
   totalCount,
+  model,
 }: {
   tab: EventsTab;
   onTabChange: (tab: EventsTab) => void;
@@ -828,6 +850,7 @@ function EventsToolbar({
   onSearchChange: (value: string) => void;
   filteredCount: number;
   totalCount: number;
+  model: string | null;
 }) {
   const transcriptAllSelected = selectedKinds.length === EVENT_KINDS.length;
   const debugAllSelected =
@@ -877,6 +900,15 @@ function EventsToolbar({
       {isFiltering && totalCount > 0 && (
         <span className="text-xs tabular-nums text-fg-muted">
           {filteredCount.toLocaleString()} of {totalCount.toLocaleString()} events
+        </span>
+      )}
+      {model && (
+        <span
+          className="inline-flex items-center gap-1.5 text-xs text-fg-muted"
+          title="LLM model used for this stage"
+        >
+          <CpuChipIcon className="size-3.5" aria-hidden="true" />
+          <span className="font-mono">{model}</span>
         </span>
       )}
     </div>
@@ -949,6 +981,14 @@ export default function RunStages() {
     }
     return Array.from(set).sort();
   }, [debugEvents]);
+  const stageModel = useMemo(
+    () =>
+      selectedStageId
+        ? extractStageModel(stageEventsQuery.data ?? [], selectedStageId)
+        : null,
+    [stageEventsQuery.data, selectedStageId],
+  );
+
   const filteredDebugEvents = useMemo<EventEnvelope[]>(() => {
     const useCategoryFilter = selectedDebugCategories.length > 0;
     const cats = new Set(selectedDebugCategories);
@@ -1008,6 +1048,7 @@ export default function RunStages() {
               onSearchChange={setSearch}
               filteredCount={tab === "transcript" ? filteredTurns.length : filteredDebugEvents.length}
               totalCount={tab === "transcript" ? turns.length : debugEvents.length}
+              model={stageModel}
             />
           </div>
         </div>

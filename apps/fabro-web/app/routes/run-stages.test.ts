@@ -1,7 +1,7 @@
 import { describe, expect, test } from "bun:test";
 import type { EventEnvelope } from "@qltysh/fabro-api-client";
 
-import { eventsToActivity } from "./run-stages";
+import { eventsToActivity, extractStageModel } from "./run-stages";
 
 function envelope(seq: number, partial: Partial<EventEnvelope>): EventEnvelope {
   return {
@@ -161,6 +161,63 @@ describe("eventsToActivity", () => {
         isError: false,
       });
     }
+  });
+
+  test("extractStageModel pulls model from agent.session.activated, ignoring other stages", () => {
+    const events: EventEnvelope[] = [
+      envelope(1, {
+        event: "agent.session.activated",
+        stage_id: "simplify@1",
+        node_id: "simplify",
+        properties: { provider: "anthropic", model: "claude-sonnet-4-5" },
+      }),
+      envelope(2, {
+        event: "agent.session.activated",
+        stage_id: "verify@1",
+        node_id: "verify",
+        properties: { provider: "openai", model: "gpt-5" },
+      }),
+    ];
+
+    expect(extractStageModel(events, "simplify@1")).toBe("claude-sonnet-4-5");
+    expect(extractStageModel(events, "verify@1")).toBe("gpt-5");
+    expect(extractStageModel(events, "fmt@1")).toBe(null);
+  });
+
+  test("extractStageModel uses latest stage event with a model", () => {
+    const events: EventEnvelope[] = [
+      envelope(1, {
+        event: "stage.prompt",
+        stage_id: "agent@1",
+        node_id: "agent",
+        properties: { model: "claude-opus-4-5" },
+      }),
+      envelope(2, {
+        event: "agent.cli.started",
+        stage_id: "agent@1",
+        node_id: "agent",
+        properties: {
+          provider: "anthropic",
+          model: "claude-sonnet-4-6",
+          command: "claude",
+        },
+      }),
+    ];
+
+    expect(extractStageModel(events, "agent@1")).toBe("claude-sonnet-4-6");
+  });
+
+  test("extractStageModel ignores model from unrelated event types", () => {
+    const events: EventEnvelope[] = [
+      envelope(1, {
+        event: "agent.message",
+        stage_id: "agent@1",
+        node_id: "agent",
+        properties: { text: "hi", model: "should-be-ignored" },
+      }),
+    ];
+
+    expect(extractStageModel(events, "agent@1")).toBe(null);
   });
 
   test("ignores unknown event types and events for other stages", () => {
