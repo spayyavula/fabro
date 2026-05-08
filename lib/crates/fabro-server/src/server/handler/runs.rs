@@ -143,6 +143,7 @@ fn board_run_metadata_from_projection(
             "pull_request".to_string(),
             serde_json::json!({
                 "number": pull_request.number,
+                "html_url": pull_request.html_url,
             }),
         );
     }
@@ -181,6 +182,37 @@ fn board_run_metadata_from_projection(
     }
 
     metadata
+}
+
+#[cfg(test)]
+mod tests {
+    use fabro_types::PullRequestRecord;
+
+    use super::board_run_metadata_from_projection;
+
+    #[test]
+    fn board_run_metadata_includes_pull_request_url() {
+        let mut projection = fabro_store::RunProjection::default();
+        projection.pull_request = Some(PullRequestRecord {
+            html_url:    "https://github.com/fabro-sh/fabro/pull/123".to_string(),
+            number:      123,
+            owner:       "fabro-sh".to_string(),
+            repo:        "fabro".to_string(),
+            base_branch: "main".to_string(),
+            head_branch: "fabro/run/demo".to_string(),
+            title:       "Add run PR chip".to_string(),
+        });
+
+        let metadata = board_run_metadata_from_projection(&projection);
+
+        assert_eq!(
+            metadata.get("pull_request"),
+            Some(&serde_json::json!({
+                "number": 123,
+                "html_url": "https://github.com/fabro-sh/fabro/pull/123"
+            }))
+        );
+    }
 }
 
 fn paginate_items<T>(items: Vec<T>, pagination: &PaginationParams) -> (Vec<T>, bool) {

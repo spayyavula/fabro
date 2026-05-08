@@ -71,7 +71,7 @@ type RunDetailActionResult = import("./run-detail").RunDetailActionResult;
 
 const h = createElement;
 
-function makeRunSummary(status = "succeeded", diffSummary: any = null) {
+function makeRunSummary(status = "succeeded", diffSummary: any = null, pullRequest: any = null) {
   return {
     run_id:          "run_1",
     title:           "Run 1",
@@ -83,6 +83,7 @@ function makeRunSummary(status = "succeeded", diffSummary: any = null) {
     elapsed_secs:    null,
     source_directory: null,
     diff_summary:    diffSummary,
+    pull_request:    pullRequest,
   };
 }
 
@@ -109,13 +110,15 @@ async function renderRunDetail({
   status = "succeeded",
   questions = [],
   diffSummary = null,
+  pullRequest = null,
 }: {
   initialEntry: string;
   status?: string;
   questions?: any[];
   diffSummary?: any;
+  pullRequest?: any;
 }) {
-  currentRunSummary = makeRunSummary(status, diffSummary);
+  currentRunSummary = makeRunSummary(status, diffSummary, pullRequest);
   currentQuestions = questions;
   (globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
 
@@ -397,6 +400,31 @@ describe("RunDetail full-height child routes", () => {
     });
 
     expect(tabCountBadges(renderer)).toHaveLength(0);
+  });
+
+  test("shows a linked pull request chip in the run header", async () => {
+    const renderer = await renderRunDetail({
+      initialEntry: "/runs/run_1",
+      pullRequest: {
+        html_url: "https://github.com/fabro-sh/fabro/pull/123",
+        number: 123,
+        owner: "fabro-sh",
+        repo: "fabro",
+        base_branch: "main",
+        head_branch: "fabro/run/demo",
+        title: "Add run PR chip",
+      },
+    });
+
+    const links = renderer.root.findAll(
+      (node) =>
+        node.type === "a" &&
+        node.props.href === "https://github.com/fabro-sh/fabro/pull/123",
+    );
+
+    expect(links).toHaveLength(1);
+    expect(links[0].props.target).toBe("_blank");
+    expect(links[0].children.filter((child) => typeof child !== "object").join("")).toBe("#123");
   });
 
   test("keeps blocked full-height children clear of the interview dock without an h-72 sibling", async () => {

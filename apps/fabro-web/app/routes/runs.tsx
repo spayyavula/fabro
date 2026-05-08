@@ -25,6 +25,7 @@ import { ciConfig, columnStatusDisplay, columnStatuses, deriveCiStatus, mapRunLi
 import type { CiStatus, CheckRun, CheckStatus, RunItem, RunWithStatus, ColumnStatus } from "../data/runs";
 import { formatRelativeTime } from "../lib/format";
 import { EmptyState } from "../components/state";
+import { GitPullRequestIcon } from "../components/icons";
 import { useToast } from "../components/toast";
 import { shouldRefreshBoardForEvent, useBoardEvents } from "../lib/board-events";
 import { useAuthConfig, useBoardsRuns, useSystemInfo } from "../lib/queries";
@@ -127,19 +128,6 @@ function listLifecycleStatusLabel(run: Pick<RunWithStatus, "statusLabel" | "life
   return run.lifecycleStatusLabel;
 }
 
-
-function GitPullRequestIcon({ className }: { className?: string }) {
-  return (
-    <svg
-      viewBox="0 0 16 16"
-      fill="currentColor"
-      className={className}
-      aria-hidden="true"
-    >
-      <path d="M1.5 3.25a2.25 2.25 0 1 1 3 2.122v5.256a2.251 2.251 0 1 1-1.5 0V5.372A2.25 2.25 0 0 1 1.5 3.25Zm5.677-.177L9.573.677A.25.25 0 0 1 10 .854V2.5h1A2.5 2.5 0 0 1 13.5 5v5.628a2.251 2.251 0 1 1-1.5 0V5a1 1 0 0 0-1-1h-1v1.646a.25.25 0 0 1-.427.177L7.177 3.427a.25.25 0 0 1 0-.354ZM3.75 2.5a.75.75 0 1 0 0 1.5.75.75 0 0 0 0-1.5Zm0 9.5a.75.75 0 1 0 0 1.5.75.75 0 0 0 0-1.5Zm8.25.75a.75.75 0 1 0 1.5 0 .75.75 0 0 0-1.5 0Z" />
-    </svg>
-  );
-}
 
 function CheckStatusIcon({ status }: { status: CheckStatus }) {
   switch (status) {
@@ -298,10 +286,23 @@ function PrCard({
           </span>
         )}
         {pr.number != null && (
-          <span className={`ml-auto inline-flex items-center gap-1 font-mono text-xs ${iconColor}`}>
-            <GitPullRequestIcon className="size-3.5 shrink-0" />
-            #{pr.number}
-          </span>
+          pr.pullRequestUrl ? (
+            <a
+              href={pr.pullRequestUrl}
+              target="_blank"
+              rel="noreferrer"
+              onClick={(event) => event.stopPropagation()}
+              className={`ml-auto inline-flex items-center gap-1 font-mono text-xs ${iconColor} hover:text-fg`}
+            >
+              <GitPullRequestIcon className="size-3.5 shrink-0" />
+              #{pr.number}
+            </a>
+          ) : (
+            <span className={`ml-auto inline-flex items-center gap-1 font-mono text-xs ${iconColor}`}>
+              <GitPullRequestIcon className="size-3.5 shrink-0" />
+              #{pr.number}
+            </span>
+          )
         )}
       </div>
 
@@ -637,11 +638,25 @@ function RunRow({ run }: { run: RunWithStatus }) {
 
       <span className="inline-flex items-center justify-end gap-1.5 font-mono text-xs text-fg-muted">
         {run.number != null && (
-          <>
-            <GitPullRequestIcon className="size-3" />
-            #{run.number}
-            {run.checks != null && <span className={`size-1.5 rounded-full ${ciConfig[deriveCiStatus(run.checks)].dot}`} />}
-          </>
+          run.pullRequestUrl ? (
+            <a
+              href={run.pullRequestUrl}
+              target="_blank"
+              rel="noreferrer"
+              onClick={(event) => event.stopPropagation()}
+              className="inline-flex items-center gap-1.5 hover:text-fg"
+            >
+              <GitPullRequestIcon className="size-3" />
+              #{run.number}
+              {run.checks != null && <span className={`size-1.5 rounded-full ${ciConfig[deriveCiStatus(run.checks)].dot}`} />}
+            </a>
+          ) : (
+            <>
+              <GitPullRequestIcon className="size-3" />
+              #{run.number}
+              {run.checks != null && <span className={`size-1.5 rounded-full ${ciConfig[deriveCiStatus(run.checks)].dot}`} />}
+            </>
+          )
         )}
       </span>
     </Link>

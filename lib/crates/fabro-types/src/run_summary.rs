@@ -4,7 +4,9 @@ use chrono::{DateTime, Utc};
 use fabro_util::text::strip_goal_decoration;
 use serde::{Deserialize, Serialize};
 
-use crate::{DiffSummary, RepositoryReference, RunControlAction, RunId, RunStatus};
+use crate::{
+    DiffSummary, PullRequestRecord, RepositoryReference, RunControlAction, RunId, RunStatus,
+};
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct RunSummary {
@@ -41,6 +43,8 @@ pub struct RunSummary {
     pub superseded_by:    Option<RunId>,
     #[serde(default)]
     pub diff_summary:     Option<DiffSummary>,
+    #[serde(default)]
+    pub pull_request:     Option<PullRequestRecord>,
 }
 
 impl RunSummary {
@@ -65,6 +69,7 @@ impl RunSummary {
         total_usd_micros: Option<i64>,
         superseded_by: Option<RunId>,
         diff_summary: Option<DiffSummary>,
+        pull_request: Option<PullRequestRecord>,
     ) -> Self {
         let title = truncate_goal(&goal);
         let repository = RepositoryReference {
@@ -94,6 +99,7 @@ impl RunSummary {
             total_usd_micros,
             superseded_by,
             diff_summary,
+            pull_request,
         }
     }
 }
@@ -191,6 +197,7 @@ mod tests {
             Some(123),
             Some(fixtures::RUN_2),
             None,
+            None,
         );
 
         assert_eq!(summary.title, "ship it");
@@ -250,6 +257,43 @@ mod tests {
     }
 
     #[test]
+    fn summary_round_trips_pull_request() {
+        let summary: RunSummary = serde_json::from_value(json!({
+            "run_id": fixtures::RUN_1,
+            "goal": "ship it",
+            "title": "ship it",
+            "labels": {},
+            "status": { "kind": "running" },
+            "repository": { "name": "fabro" },
+            "created_at": fixtures::RUN_1.created_at(),
+            "pull_request": {
+                "html_url": "https://github.com/fabro-sh/fabro/pull/123",
+                "number": 123,
+                "owner": "fabro-sh",
+                "repo": "fabro",
+                "base_branch": "main",
+                "head_branch": "fabro/run/demo",
+                "title": "Add run PR chip"
+            }
+        }))
+        .unwrap();
+
+        let value = serde_json::to_value(&summary).unwrap();
+        assert_eq!(
+            value["pull_request"],
+            json!({
+                "html_url": "https://github.com/fabro-sh/fabro/pull/123",
+                "number": 123,
+                "owner": "fabro-sh",
+                "repo": "fabro",
+                "base_branch": "main",
+                "head_branch": "fabro/run/demo",
+                "title": "Add run PR chip"
+            })
+        );
+    }
+
+    #[test]
     fn summary_falls_back_to_source_directory_then_unknown() {
         let source_only = RunSummary::new(
             fixtures::RUN_1,
@@ -263,6 +307,7 @@ mod tests {
             None,
             None,
             RunStatus::Submitted,
+            None,
             None,
             None,
             None,
@@ -284,6 +329,7 @@ mod tests {
             None,
             None,
             RunStatus::Submitted,
+            None,
             None,
             None,
             None,

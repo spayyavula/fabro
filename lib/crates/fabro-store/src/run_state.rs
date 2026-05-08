@@ -560,6 +560,7 @@ pub(crate) fn build_summary(state: &RunProjection, run_id: &RunId) -> RunSummary
             .and_then(|billing| billing.total_usd_micros),
         state.superseded_by,
         state.diff_summary,
+        state.pull_request.clone(),
     )
 }
 
@@ -1957,6 +1958,42 @@ mod tests {
 
         let summary = build_summary(&state, &fixtures::RUN_1);
         assert_eq!(summary.superseded_by, Some(fixtures::RUN_2));
+    }
+
+    #[test]
+    fn pull_request_created_populates_projection_and_summary() {
+        use fabro_types::run_event::PullRequestCreatedProps;
+
+        let mut state = RunProjection::default();
+        state
+            .apply_event(&test_event(
+                1,
+                EventBody::PullRequestCreated(PullRequestCreatedProps {
+                    pr_url:      "https://github.com/fabro-sh/fabro/pull/123".to_string(),
+                    pr_number:   123,
+                    owner:       "fabro-sh".to_string(),
+                    repo:        "fabro".to_string(),
+                    base_branch: "main".to_string(),
+                    head_branch: "fabro/run/demo".to_string(),
+                    title:       "Add run PR chip".to_string(),
+                    draft:       false,
+                }),
+                None,
+            ))
+            .unwrap();
+
+        let pull_request = state
+            .pull_request
+            .as_ref()
+            .expect("projection should store pull request");
+        assert_eq!(
+            pull_request.html_url,
+            "https://github.com/fabro-sh/fabro/pull/123"
+        );
+        assert_eq!(pull_request.number, 123);
+
+        let summary = build_summary(&state, &fixtures::RUN_1);
+        assert_eq!(summary.pull_request, state.pull_request);
     }
 
     #[test]

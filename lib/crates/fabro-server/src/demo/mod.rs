@@ -944,6 +944,7 @@ mod runs {
             total_usd_micros,
             None,
             None,
+            None,
         )
     }
 
@@ -1064,6 +1065,7 @@ mod runs {
     ) -> RunPullRequest {
         RunPullRequest {
             number,
+            html_url: Some(format!("https://github.com/demo/fabro/pull/{number}")),
             additions: Some(additions),
             deletions: Some(deletions),
             comments: Some(comments),

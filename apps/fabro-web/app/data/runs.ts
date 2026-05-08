@@ -26,6 +26,7 @@ export interface RunItem {
   lifecycleStatus?: RunStatus | null;
   lifecycleStatusLabel?: string;
   number?: number;
+  pullRequestUrl?: string;
   additions?: number;
   deletions?: number;
   checks?: CheckRun[];
@@ -92,6 +93,7 @@ export function mapRunListItem(item: RunListItem): RunItem {
     lifecycleStatus,
     lifecycleStatusLabel: lifecycleStatusLabel(item.status),
     number: item.pull_request?.number,
+    pullRequestUrl: item.pull_request?.html_url,
     additions: item.pull_request?.additions,
     deletions: item.pull_request?.deletions,
     checks: item.pull_request?.checks?.map((c) => ({
@@ -122,6 +124,8 @@ export function mapRunSummaryToRunItem(summary: RunSummary): RunItem {
     workflow: summary.workflow_slug ?? summary.workflow_name ?? "unknown",
     lifecycleStatus,
     lifecycleStatusLabel: lifecycleStatusLabel(summary.status),
+    number: summary.pull_request?.number,
+    pullRequestUrl: summary.pull_request?.html_url,
     sourceDirectory: summary.source_directory ?? undefined,
     elapsed:
       summary.elapsed_secs != null
