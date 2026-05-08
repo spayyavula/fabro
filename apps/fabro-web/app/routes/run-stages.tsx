@@ -9,6 +9,8 @@ import {
 import { XMarkIcon } from "@heroicons/react/24/outline";
 import {
   CheckIcon,
+  ChevronDownIcon,
+  ChevronRightIcon,
   ChevronUpDownIcon,
   CpuChipIcon,
   FunnelIcon,
@@ -52,6 +54,10 @@ type TurnType =
 
 type CommandTurn = Extract<TurnType, { kind: "command" }>;
 type StageKind = "agent" | "command";
+
+type PanelSelection =
+  | { kind: "single"; turnIndex: number }
+  | { kind: "group"; childTurnIndices: number[] };
 
 const STAGE_ACTIVITY_EVENT_SET = new Set<string>(STAGE_ACTIVITY_EVENT_TYPES);
 
@@ -227,6 +233,59 @@ export function turnsToStageKind(turns: TurnType[]): StageKind {
     if (t.kind === "command") hasCommand = true;
   }
   return hasCommand ? "command" : "agent";
+}
+
+type ToolTurn = Extract<TurnType, { kind: "tool" }>;
+
+export type DisplayItem =
+  | { kind: "single"; turn: TurnType; turnIndex: number }
+  | {
+      kind: "group";
+      toolName: string;
+      ts: string;
+      durationMs: number;
+      children: { turn: ToolTurn; turnIndex: number }[];
+    };
+
+export function groupConsecutiveTools(
+  filtered: { turn: TurnType; index: number }[],
+): DisplayItem[] {
+  const out: DisplayItem[] = [];
+  let buf: { turn: ToolTurn; turnIndex: number }[] = [];
+
+  function flush() {
+    if (buf.length === 0) return;
+    if (buf.length === 1) {
+      out.push({ kind: "single", turn: buf[0].turn, turnIndex: buf[0].turnIndex });
+    } else {
+      const first = buf[0].turn;
+      const totalMs = buf.reduce((sum, b) => sum + b.turn.durationMs, 0);
+      out.push({
+        kind: "group",
+        toolName: first.toolName,
+        ts: first.ts,
+        durationMs: totalMs,
+        children: buf,
+      });
+    }
+    buf = [];
+  }
+
+  for (const { turn, index } of filtered) {
+    const groupable = turn.kind === "tool" && !turn.isError;
+    if (groupable && (buf.length === 0 || buf[0].turn.toolName === turn.toolName)) {
+      buf.push({ turn, turnIndex: index });
+      continue;
+    }
+    flush();
+    if (groupable) {
+      buf.push({ turn, turnIndex: index });
+    } else {
+      out.push({ kind: "single", turn, turnIndex: index });
+    }
+  }
+  flush();
+  return out;
 }
 
 const STAGE_MODEL_EVENT_NAMES = new Set([
@@ -461,6 +520,50 @@ function EventRow({
       <Tooltip label={formatAbsoluteTs(turn.ts)}>
         <span className="pl-3 font-mono text-xs tabular-nums text-fg-muted">
           {formatElapsed(turn.ts, runStart)}
+        </span>
+      </Tooltip>
+    </button>
+  );
+}
+
+const TOOL_GROUP_TONE = "bg-mint/15 text-mint";
+
+function ToolGroupRow({
+  group,
+  runStart,
+  selected,
+  onSelect,
+}: {
+  group: Extract<DisplayItem, { kind: "group" }>;
+  runStart: string | undefined;
+  selected: boolean;
+  onSelect: () => void;
+}) {
+  const metric = group.durationMs > 0 ? formatDurationMs(group.durationMs) : null;
+  return (
+    <button
+      type="button"
+      onClick={onSelect}
+      aria-pressed={selected}
+      className={`grid w-full grid-cols-[5rem_1fr_auto_auto] items-center gap-4 px-5 py-2.5 text-left transition-colors hover:bg-overlay focus-visible:outline-2 focus-visible:-outline-offset-2 focus-visible:outline-teal-500 ${
+        selected ? "bg-overlay" : ""
+      }`}
+    >
+      <span
+        className={`inline-flex w-fit items-center rounded-full px-2 py-0.5 text-[10px] font-medium uppercase tracking-wider ${TOOL_GROUP_TONE}`}
+      >
+        Tool
+      </span>
+      <span className="min-w-0 truncate text-sm text-fg-3">
+        {humanizeToolName(group.toolName)} x{group.children.length}
+      </span>
+      <span className="inline-flex items-center justify-end gap-1.5 font-mono text-xs tabular-nums text-fg-muted">
+        {metric && <ClockIcon className="size-3" aria-hidden="true" />}
+        {metric ?? ""}
+      </span>
+      <Tooltip label={formatAbsoluteTs(group.ts)}>
+        <span className="pl-3 font-mono text-xs tabular-nums text-fg-muted">
+          {formatElapsed(group.ts, runStart)}
         </span>
       </Tooltip>
     </button>
@@ -868,6 +971,152 @@ function EventDetailsPanel({
   );
 }
 
+const TOOL_INPUT_PREVIEW_KEYS = ["command", "path", "pattern", "url", "query", "script"];
+
+function toolInputPreview(turn: ToolTurn): string {
+  const raw = turn.input;
+  if (!raw) return "";
+  try {
+    const parsed = JSON.parse(raw);
+    if (typeof parsed === "string") return oneLine(parsed);
+    if (parsed && typeof parsed === "object" && !Array.isArray(parsed)) {
+      const obj = parsed as Record<string, unknown>;
+      for (const k of TOOL_INPUT_PREVIEW_KEYS) {
+        const v = obj[k];
+        if (typeof v === "string" && v) return oneLine(v);
+      }
+    }
+  } catch {
+    // input wasn't valid JSON; fall through to oneLine of the raw string
+  }
+  return oneLine(raw);
+}
+
+function ToolGroupChildRow({
+  child,
+  runStart,
+  expanded,
+  onToggle,
+}: {
+  child: { turn: ToolTurn; turnIndex: number };
+  runStart: string | undefined;
+  expanded: boolean;
+  onToggle: () => void;
+}) {
+  const { turn } = child;
+  const metric = turn.durationMs > 0 ? formatDurationMs(turn.durationMs) : null;
+  const elapsed = formatElapsed(turn.ts, runStart);
+  const Chevron = expanded ? ChevronDownIcon : ChevronRightIcon;
+  return (
+    <button
+      type="button"
+      onClick={onToggle}
+      aria-expanded={expanded}
+      className={`grid w-full grid-cols-[auto_1fr_auto_auto] items-center gap-3 px-5 py-2.5 text-left transition-colors hover:bg-overlay focus-visible:outline-2 focus-visible:-outline-offset-2 focus-visible:outline-teal-500 ${
+        expanded ? "bg-overlay" : ""
+      }`}
+    >
+      <span
+        className={`inline-flex w-fit items-center rounded-full px-2 py-0.5 text-[10px] font-medium uppercase tracking-wider ${TOOL_GROUP_TONE}`}
+      >
+        {humanizeToolName(turn.toolName)}
+      </span>
+      <span className="min-w-0 truncate font-mono text-xs text-fg-3">
+        {toolInputPreview(turn)}
+      </span>
+      <span className="inline-flex items-center justify-end gap-1.5 font-mono text-xs tabular-nums text-fg-muted">
+        {metric && <ClockIcon className="size-3" aria-hidden="true" />}
+        {metric ?? ""}
+        <Tooltip label={formatAbsoluteTs(turn.ts)}>
+          <span className="pl-3 tabular-nums">{elapsed}</span>
+        </Tooltip>
+      </span>
+      <Chevron className="size-4 text-fg-muted" aria-hidden="true" />
+    </button>
+  );
+}
+
+function ToolGroupDetails({
+  group,
+  runStart,
+}: {
+  group: Extract<DisplayItem, { kind: "group" }>;
+  runStart: string | undefined;
+}) {
+  const [expandedIndex, setExpandedIndex] = useState<number | null>(null);
+  useEffect(() => {
+    setExpandedIndex(null);
+  }, [group]);
+
+  const elapsed = formatElapsed(group.ts, runStart);
+  const totalDuration = group.durationMs > 0 ? formatDurationMs(group.durationMs) : null;
+
+  return (
+    <div className="-mx-5 -mt-4">
+      <div className="flex items-baseline gap-3 border-b border-line px-5 py-3">
+        <span
+          className={`inline-flex items-center rounded-full px-2 py-0.5 text-[10px] font-medium uppercase tracking-wider ${TOOL_GROUP_TONE}`}
+        >
+          Tool
+        </span>
+        <span className="text-sm font-medium text-fg">
+          {humanizeToolName(group.toolName)}{" "}
+          <span className="text-fg-muted">x{group.children.length}</span>
+        </span>
+        <span className="ml-auto inline-flex items-center gap-1.5 font-mono text-xs tabular-nums text-fg-muted">
+          {elapsed}
+          {totalDuration && (
+            <>
+              <span aria-hidden="true">·</span>
+              <ClockIcon className="size-3" aria-hidden="true" />
+              {totalDuration}
+            </>
+          )}
+        </span>
+      </div>
+      <ul className="divide-y divide-line">
+        {group.children.map((child, i) => (
+          <li key={`group-child-${child.turnIndex}`}>
+            <ToolGroupChildRow
+              child={child}
+              runStart={runStart}
+              expanded={expandedIndex === i}
+              onToggle={() =>
+                setExpandedIndex((current) => (current === i ? null : i))
+              }
+            />
+            {expandedIndex === i && (
+              <div className="bg-overlay/50 px-5 py-4">
+                <EventDetails turn={child.turn} runStart={runStart} />
+              </div>
+            )}
+          </li>
+        ))}
+      </ul>
+    </div>
+  );
+}
+
+function ToolGroupDetailsPanel({
+  group,
+  runStart,
+  onClose,
+}: {
+  group: Extract<DisplayItem, { kind: "group" }> | null;
+  runStart: string | undefined;
+  onClose: () => void;
+}) {
+  return (
+    <DetailsPanel
+      title={group ? "Tool group" : ""}
+      isOpen={group != null}
+      onClose={onClose}
+    >
+      {group ? <ToolGroupDetails group={group} runStart={runStart} /> : null}
+    </DetailsPanel>
+  );
+}
+
 function DebugEventDetails({ event }: { event: EventEnvelope }) {
   const text = useMemo(() => JSON.stringify(event, null, 2), [event]);
   const tokens = useMemo(() => highlightJson(text), [text]);
@@ -1149,13 +1398,12 @@ export default function RunStages() {
     return null;
   }, [turns]);
 
-  const [openIndex, setOpenIndex] = useState<number | null>(null);
+  const [panelSelection, setPanelSelection] = useState<PanelSelection | null>(null);
   const [openDebugSeq, setOpenDebugSeq] = useState<number | null>(null);
   useEffect(() => {
-    setOpenIndex(null);
+    setPanelSelection(null);
     setOpenDebugSeq(null);
   }, [selectedStageId]);
-  const openTurn = openIndex != null ? turns[openIndex] ?? null : null;
 
   const [tab, setTab] = useState<EventsTab>("transcript");
   const [selectedKinds, setSelectedKinds] = useState<EventKind[]>([
@@ -1174,6 +1422,24 @@ export default function RunStages() {
     });
     return out;
   }, [turns, selectedKinds, search]);
+  const displayItems = useMemo(
+    () => groupConsecutiveTools(filteredTurns),
+    [filteredTurns],
+  );
+
+  const openTurn =
+    panelSelection?.kind === "single" ? turns[panelSelection.turnIndex] ?? null : null;
+  const openGroup = useMemo<Extract<DisplayItem, { kind: "group" }> | null>(() => {
+    if (panelSelection?.kind !== "group") return null;
+    const wanted = panelSelection.childTurnIndices;
+    for (const item of displayItems) {
+      if (item.kind !== "group") continue;
+      if (item.children.length !== wanted.length) continue;
+      const matches = item.children.every((c, i) => c.turnIndex === wanted[i]);
+      if (matches) return item;
+    }
+    return null;
+  }, [displayItems, panelSelection]);
 
   const debugEvents = useMemo<EventEnvelope[]>(() => {
     if (!selectedStageId) return [];
@@ -1277,15 +1543,44 @@ export default function RunStages() {
                 No events match these filters.
               </div>
             ) : (
-              filteredTurns.map(({ turn, index }) => (
-                <EventRow
-                  key={`turn-${index}`}
-                  turn={turn}
-                  runStart={runStart}
-                  selected={openIndex === index}
-                  onSelect={() => setOpenIndex(index)}
-                />
-              ))
+              displayItems.map((item) => {
+                if (item.kind === "single") {
+                  return (
+                    <EventRow
+                      key={`turn-${item.turnIndex}`}
+                      turn={item.turn}
+                      runStart={runStart}
+                      selected={
+                        panelSelection?.kind === "single" &&
+                        panelSelection.turnIndex === item.turnIndex
+                      }
+                      onSelect={() =>
+                        setPanelSelection({ kind: "single", turnIndex: item.turnIndex })
+                      }
+                    />
+                  );
+                }
+                const childIndices = item.children.map((c) => c.turnIndex);
+                const groupKey = `group-${childIndices.join("-")}`;
+                const isSelected =
+                  panelSelection?.kind === "group" &&
+                  panelSelection.childTurnIndices.length === childIndices.length &&
+                  panelSelection.childTurnIndices.every((v, i) => v === childIndices[i]);
+                return (
+                  <ToolGroupRow
+                    key={groupKey}
+                    group={item}
+                    runStart={runStart}
+                    selected={isSelected}
+                    onSelect={() =>
+                      setPanelSelection({
+                        kind: "group",
+                        childTurnIndices: childIndices,
+                      })
+                    }
+                  />
+                );
+              })
             )
           ) : debugEvents.length > 0 && filteredDebugEvents.length === 0 ? (
             <div className="px-2 py-6 text-sm text-fg-muted">
@@ -1306,11 +1601,17 @@ export default function RunStages() {
       </div>
 
       {tab === "transcript" ? (
-        stageKind === "command" ? null : (
+        stageKind === "command" ? null : panelSelection?.kind === "group" ? (
+          <ToolGroupDetailsPanel
+            group={openGroup}
+            runStart={runStart}
+            onClose={() => setPanelSelection(null)}
+          />
+        ) : (
           <EventDetailsPanel
             turn={openTurn}
             runStart={runStart}
-            onClose={() => setOpenIndex(null)}
+            onClose={() => setPanelSelection(null)}
           />
         )
       ) : (

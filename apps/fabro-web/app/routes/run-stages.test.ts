@@ -1,7 +1,12 @@
 import { describe, expect, test } from "bun:test";
 import type { EventEnvelope } from "@qltysh/fabro-api-client";
 
-import { eventsToActivity, extractStageModel, turnsToStageKind } from "./run-stages";
+import {
+  eventsToActivity,
+  extractStageModel,
+  groupConsecutiveTools,
+  turnsToStageKind,
+} from "./run-stages";
 
 function envelope(seq: number, partial: Partial<EventEnvelope>): EventEnvelope {
   return {
@@ -252,6 +257,153 @@ describe("eventsToActivity", () => {
     expect(turns).toHaveLength(1);
     if (turns[0].kind === "assistant") {
       expect(turns[0].content).toBe("signal");
+    }
+  });
+});
+
+describe("groupConsecutiveTools", () => {
+  type Filtered = Parameters<typeof groupConsecutiveTools>[0];
+
+  function tool(opts: {
+    ts: string;
+    toolName: string;
+    durationMs?: number;
+    isError?: boolean;
+    input?: string;
+    result?: string;
+  }) {
+    return {
+      kind: "tool" as const,
+      ts: opts.ts,
+      toolName: opts.toolName,
+      input: opts.input ?? "",
+      result: opts.result ?? "",
+      isError: opts.isError ?? false,
+      durationMs: opts.durationMs ?? 0,
+    };
+  }
+
+  function entry(turn: ReturnType<typeof tool> | { kind: "system"; ts: string; content: string } | { kind: "assistant"; ts: string; content: string; inputTokens: number; outputTokens: number }, index: number): Filtered[number] {
+    return { turn, index };
+  }
+
+  test("empty input returns empty output", () => {
+    expect(groupConsecutiveTools([])).toEqual([]);
+  });
+
+  test("single tool turn becomes a single, not a group", () => {
+    const t = tool({ ts: "2026-04-09T12:00:00Z", toolName: "shell", durationMs: 100 });
+    expect(groupConsecutiveTools([entry(t, 0)])).toEqual([
+      { kind: "single", turn: t, turnIndex: 0 },
+    ]);
+  });
+
+  test("two consecutive same-tool successes form a group of 2", () => {
+    const a = tool({ ts: "2026-04-09T12:00:00Z", toolName: "shell", durationMs: 1000 });
+    const b = tool({ ts: "2026-04-09T12:00:01Z", toolName: "shell", durationMs: 2000 });
+    const result = groupConsecutiveTools([entry(a, 0), entry(b, 1)]);
+    expect(result).toEqual([
+      {
+        kind: "group",
+        toolName: "shell",
+        ts: "2026-04-09T12:00:00Z",
+        durationMs: 3000,
+        children: [
+          { turn: a, turnIndex: 0 },
+          { turn: b, turnIndex: 1 },
+        ],
+      },
+    ]);
+  });
+
+  test("five consecutive same-tool successes form one group; durations summed; ts is first", () => {
+    const turns = [0, 1, 2, 3, 4].map((i) =>
+      tool({
+        ts: `2026-04-09T12:00:0${i}Z`,
+        toolName: "shell",
+        durationMs: (i + 1) * 1000,
+      }),
+    );
+    const filtered = turns.map((t, i) => entry(t, i));
+    const result = groupConsecutiveTools(filtered);
+    expect(result).toHaveLength(1);
+    const item = result[0];
+    expect(item.kind).toBe("group");
+    if (item.kind === "group") {
+      expect(item.ts).toBe("2026-04-09T12:00:00Z");
+      expect(item.durationMs).toBe(15000);
+      expect(item.children.map((c) => c.turnIndex)).toEqual([0, 1, 2, 3, 4]);
+    }
+  });
+
+  test("a different tool between same-tool calls breaks the group boundary", () => {
+    const a = tool({ ts: "2026-04-09T12:00:00Z", toolName: "shell", durationMs: 1 });
+    const b = tool({ ts: "2026-04-09T12:00:01Z", toolName: "shell", durationMs: 1 });
+    const c = tool({ ts: "2026-04-09T12:00:02Z", toolName: "read_file", durationMs: 1 });
+    const d = tool({ ts: "2026-04-09T12:00:03Z", toolName: "shell", durationMs: 1 });
+    const e = tool({ ts: "2026-04-09T12:00:04Z", toolName: "shell", durationMs: 1 });
+    const result = groupConsecutiveTools([
+      entry(a, 0),
+      entry(b, 1),
+      entry(c, 2),
+      entry(d, 3),
+      entry(e, 4),
+    ]);
+    expect(result.map((r) => r.kind)).toEqual(["group", "single", "group"]);
+    if (result[0].kind === "group") {
+      expect(result[0].children.map((c) => c.turnIndex)).toEqual([0, 1]);
+    }
+    if (result[1].kind === "single") {
+      expect(result[1].turnIndex).toBe(2);
+    }
+    if (result[2].kind === "group") {
+      expect(result[2].children.map((c) => c.turnIndex)).toEqual([3, 4]);
+    }
+  });
+
+  test("an errored tool call is never grouped and breaks the run", () => {
+    const a = tool({ ts: "2026-04-09T12:00:00Z", toolName: "shell" });
+    const errored = tool({ ts: "2026-04-09T12:00:01Z", toolName: "shell", isError: true });
+    const c = tool({ ts: "2026-04-09T12:00:02Z", toolName: "shell" });
+    const d = tool({ ts: "2026-04-09T12:00:03Z", toolName: "shell" });
+    const result = groupConsecutiveTools([
+      entry(a, 0),
+      entry(errored, 1),
+      entry(c, 2),
+      entry(d, 3),
+    ]);
+    expect(result.map((r) => r.kind)).toEqual(["single", "single", "group"]);
+    if (result[1].kind === "single") {
+      expect(result[1].turn).toBe(errored);
+    }
+    if (result[2].kind === "group") {
+      expect(result[2].children.map((c) => c.turnIndex)).toEqual([2, 3]);
+    }
+  });
+
+  test("non-tool turns flush the buffer correctly", () => {
+    const a = tool({ ts: "2026-04-09T12:00:00Z", toolName: "shell" });
+    const b = tool({ ts: "2026-04-09T12:00:01Z", toolName: "shell" });
+    const msg = {
+      kind: "assistant" as const,
+      ts: "2026-04-09T12:00:02Z",
+      content: "thinking",
+      inputTokens: 0,
+      outputTokens: 0,
+    };
+    const c = tool({ ts: "2026-04-09T12:00:03Z", toolName: "shell" });
+    const result = groupConsecutiveTools([
+      entry(a, 0),
+      entry(b, 1),
+      entry(msg, 2),
+      entry(c, 3),
+    ]);
+    expect(result.map((r) => r.kind)).toEqual(["group", "single", "single"]);
+    if (result[0].kind === "group") {
+      expect(result[0].children.map((c) => c.turnIndex)).toEqual([0, 1]);
+    }
+    if (result[2].kind === "single") {
+      expect(result[2].turnIndex).toBe(3);
     }
   });
 });
