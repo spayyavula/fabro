@@ -60,6 +60,7 @@ mock.module("../hooks/use-run-toasts", () => ({
 }));
 
 const {
+  actionMenuSeparatorVisibility,
   default: RunDetail,
   focusSteerAfterMenuClose,
   handleLifecycleToastResult,
@@ -185,6 +186,32 @@ describe("lifecycleActionVisibility", () => {
     expect(lifecycleActionVisibility("archived").showArchive).toBe(false);
     expect(lifecycleActionVisibility("archived").showUnarchive).toBe(true);
     expect(lifecycleActionVisibility("running").showUnarchive).toBe(false);
+  });
+});
+
+describe("actionMenuSeparatorVisibility", () => {
+  test("does not render adjacent dividers when destructive actions follow ops directly", () => {
+    expect(
+      actionMenuSeparatorVisibility({
+        hasLifecycle:  false,
+        hasDestructive: true,
+      }),
+    ).toEqual({
+      afterOperations:   true,
+      beforeDestructive: false,
+    });
+  });
+
+  test("renders both dividers when lifecycle actions sit between ops and destructive actions", () => {
+    expect(
+      actionMenuSeparatorVisibility({
+        hasLifecycle:  true,
+        hasDestructive: true,
+      }),
+    ).toEqual({
+      afterOperations:   true,
+      beforeDestructive: true,
+    });
   });
 });
 

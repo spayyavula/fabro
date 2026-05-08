@@ -69,6 +69,19 @@ export function focusSteerAfterMenuClose(focus: () => void) {
   globalThis.setTimeout(focus, 0);
 }
 
+export function actionMenuSeparatorVisibility({
+  hasLifecycle,
+  hasDestructive,
+}: {
+  hasLifecycle: boolean;
+  hasDestructive: boolean;
+}) {
+  return {
+    afterOperations:   hasLifecycle || hasDestructive,
+    beforeDestructive: hasLifecycle && hasDestructive,
+  };
+}
+
 const ACTIONS_TRIGGER_CLASS =
   `${SECONDARY_BUTTON_CLASS} disabled:cursor-not-allowed disabled:opacity-60`;
 
@@ -532,6 +545,7 @@ function ActionsMenu(props: ActionsMenuProps) {
   const hasAny = hasOps || hasLifecycle || hasDestructive;
   const anyPending =
     previewPending || archivePending || unarchivePending || deletePending || cancelPending || interruptPending;
+  const separators = actionMenuSeparatorVisibility({ hasLifecycle, hasDestructive });
 
   if (!hasAny) return null;
 
@@ -579,7 +593,7 @@ function ActionsMenu(props: ActionsMenuProps) {
             Send steering…
           </button>
         </MenuItem>
-        {(hasLifecycle || hasDestructive) && (
+        {separators.afterOperations && (
           <div className="my-1 h-px bg-line" role="separator" />
         )}
         {canArchive && (
@@ -606,7 +620,7 @@ function ActionsMenu(props: ActionsMenuProps) {
             </button>
           </MenuItem>
         )}
-        {(hasOps || hasLifecycle) && hasDestructive && (
+        {separators.beforeDestructive && (
           <div className="my-1 h-px bg-line" role="separator" />
         )}
         {canCancel && (
