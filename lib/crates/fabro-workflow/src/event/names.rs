@@ -122,6 +122,7 @@ pub fn event_name(event: &Event) -> &'static str {
         Event::AgentSessionActivated { .. } => "agent.session.activated",
         Event::AgentSessionDeactivated { .. } => "agent.session.deactivated",
         Event::AgentSessionEnded { .. } => "agent.session.ended",
+        Event::AgentInterruptInjected { .. } => "agent.interrupt.injected",
         Event::AgentSteerBuffered { .. } => "agent.steer.buffered",
         Event::AgentSteerDropped { .. } => "agent.steer.dropped",
         Event::AgentCliCancelled { .. } => "agent.cli.cancelled",

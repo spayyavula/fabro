@@ -68,6 +68,13 @@ describe("queryKeysForRunEvent", () => {
       queryKeys.runs.stageEvents("run-1", "agent@1"),
     ]);
   });
+
+  test("stage-scoped interrupt injection invalidates run events and stage events", () => {
+    expect(queryKeysForRunEvent("run-1", "agent.interrupt.injected", "nap@1")).toEqual([
+      queryKeys.runs.events("run-1", 1000),
+      queryKeys.runs.stageEvents("run-1", "nap@1"),
+    ]);
+  });
 });
 
 describe("subscribeToRunEvents", () => {

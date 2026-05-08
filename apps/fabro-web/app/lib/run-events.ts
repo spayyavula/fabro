@@ -67,6 +67,8 @@ export const STAGE_ACTIVITY_EVENT_TYPES = [
   "agent.message",
   "agent.tool.started",
   "agent.tool.completed",
+  "agent.steering.injected",
+  "agent.interrupt.injected",
   "command.started",
   "command.completed",
 ] as const;
@@ -82,6 +84,7 @@ const STEERING_EVENTS = new Set([
   "run.interrupt",
   "run.steer",
   "agent.steering.injected",
+  "agent.interrupt.injected",
   "agent.session.activated",
   "agent.session.deactivated",
   "agent.steer.buffered",
@@ -134,16 +137,16 @@ export function queryKeysForRunEvent(
     return keys;
   }
 
-  if (STAGE_ACTIVITY_EVENTS.has(event)) {
-    return stageId ? [queryKeys.runs.stageEvents(runId, stageId)] : [];
-  }
-
   if (STEERING_EVENTS.has(event)) {
     const keys: SseKey[] = [queryKeys.runs.events(runId, 1000)];
     if (stageId) {
       keys.push(queryKeys.runs.stageEvents(runId, stageId));
     }
     return keys;
+  }
+
+  if (STAGE_ACTIVITY_EVENTS.has(event)) {
+    return stageId ? [queryKeys.runs.stageEvents(runId, stageId)] : [];
   }
 
   return [];

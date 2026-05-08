@@ -1034,6 +1034,11 @@ fn event_body_from_event(event: &Event) -> EventBody {
         Event::AgentSessionEnded { .. } => {
             EventBody::AgentSessionEnded(fabro_types::AgentSessionEndedProps {})
         }
+        Event::AgentInterruptInjected { visit, .. } => {
+            EventBody::AgentInterruptInjected(fabro_types::AgentInterruptInjectedProps {
+                visit: *visit,
+            })
+        }
         Event::AgentSteerBuffered { .. } => {
             EventBody::AgentSteerBuffered(fabro_types::AgentSteerBufferedProps::default())
         }
@@ -1582,6 +1587,30 @@ mod tests {
             stored.parallel_branch_id,
             Some(ParallelBranchId::new(StageId::new("fanout", 2), 0))
         );
+    }
+
+    #[test]
+    fn agent_interrupt_injected_populates_stage_session_and_actor() {
+        let actor = Principal::System {
+            system_kind: SystemActorKind::Engine,
+        };
+        let stored = to_run_event(&fixtures::RUN_1, &Event::AgentInterruptInjected {
+            node_id:    "code".to_string(),
+            visit:      3,
+            session_id: "ses_1".to_string(),
+            actor:      Some(actor.clone()),
+        });
+
+        assert_eq!(stored.event_name(), "agent.interrupt.injected");
+        assert_eq!(stored.node_id.as_deref(), Some("code"));
+        assert_eq!(stored.node_label.as_deref(), Some("code"));
+        assert_eq!(stored.stage_id, Some(StageId::new("code", 3)));
+        assert_eq!(stored.session_id.as_deref(), Some("ses_1"));
+        assert_eq!(stored.actor, Some(actor));
+        match stored.body {
+            EventBody::AgentInterruptInjected(props) => assert_eq!(props.visit, 3),
+            other => panic!("unexpected body: {other:?}"),
+        }
     }
 
     #[test]

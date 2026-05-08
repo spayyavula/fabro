@@ -168,6 +168,64 @@ describe("eventsToActivity", () => {
     }
   });
 
+  test("renders injected steering as a transcript turn for the matching stage", () => {
+    const events: EventEnvelope[] = [
+      envelope(1, {
+        event: "run.steer",
+        properties: { text: "say hello" },
+      }),
+      envelope(2, {
+        event: "agent.steering.injected",
+        stage_id: "nap@1",
+        node_id: "nap",
+        properties: { text: "say hello", visit: 1 },
+      }),
+      envelope(3, {
+        event: "agent.steering.injected",
+        stage_id: "other@1",
+        node_id: "other",
+        properties: { text: "wrong stage", visit: 1 },
+      }),
+    ];
+
+    expect(eventsToActivity(events, "nap@1")).toEqual([
+      {
+        kind: "steer",
+        ts: "2026-04-09T12:00:00Z",
+        content: "say hello",
+      },
+    ]);
+  });
+
+  test("renders injected interrupt as a transcript turn for the matching stage", () => {
+    const events: EventEnvelope[] = [
+      envelope(1, {
+        event: "run.interrupt",
+        properties: {},
+      }),
+      envelope(2, {
+        event: "agent.interrupt.injected",
+        stage_id: "nap@1",
+        node_id: "nap",
+        properties: { visit: 1 },
+      }),
+      envelope(3, {
+        event: "agent.interrupt.injected",
+        stage_id: "other@1",
+        node_id: "other",
+        properties: { visit: 1 },
+      }),
+    ];
+
+    expect(eventsToActivity(events, "nap@1")).toEqual([
+      {
+        kind: "interrupt",
+        ts: "2026-04-09T12:00:00Z",
+        content: "Agent interrupted",
+      },
+    ]);
+  });
+
   test("extractStageModel pulls model from agent.session.activated, ignoring other stages", () => {
     const events: EventEnvelope[] = [
       envelope(1, {

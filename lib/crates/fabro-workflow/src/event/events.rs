@@ -571,6 +571,15 @@ pub enum Event {
         #[serde(default, skip_serializing_if = "Option::is_none")]
         parent_session_id: Option<String>,
     },
+    /// A run-level interrupt was delivered to a concrete API-mode agent
+    /// session/stage.
+    AgentInterruptInjected {
+        node_id:    String,
+        visit:      u32,
+        session_id: String,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        actor:      Option<Principal>,
+    },
     /// A steer arrived with no active session and was parked in the run-wide
     /// pending buffer. The actor (steer author) is lifted to top-level.
     AgentSteerBuffered {
@@ -1354,6 +1363,14 @@ impl Event {
             }
             Self::AgentSessionEnded { session_id, .. } => {
                 debug!(session_id, "Agent session ended");
+            }
+            Self::AgentInterruptInjected {
+                node_id,
+                visit,
+                session_id,
+                ..
+            } => {
+                debug!(node_id, visit, session_id, "Agent interrupt injected");
             }
             Self::AgentSteerBuffered { .. } => {
                 debug!("Steer buffered (no active session)");

@@ -178,6 +178,8 @@ pub enum EventBody {
     AgentTurnLimitReached(AgentTurnLimitReachedProps),
     #[serde(rename = "agent.steering.injected")]
     AgentSteeringInjected(AgentSteeringInjectedProps),
+    #[serde(rename = "agent.interrupt.injected")]
+    AgentInterruptInjected(AgentInterruptInjectedProps),
     #[serde(rename = "agent.steer.buffered")]
     AgentSteerBuffered(AgentSteerBufferedProps),
     #[serde(rename = "agent.steer.dropped")]
@@ -412,6 +414,7 @@ impl EventBody {
             Self::AgentLoopDetected(_) => "agent.loop.detected",
             Self::AgentTurnLimitReached(_) => "agent.turn.limit",
             Self::AgentSteeringInjected(_) => "agent.steering.injected",
+            Self::AgentInterruptInjected(_) => "agent.interrupt.injected",
             Self::AgentSteerBuffered(_) => "agent.steer.buffered",
             Self::AgentSteerDropped(_) => "agent.steer.dropped",
             Self::AgentCompactionStarted(_) => "agent.compaction.started",
@@ -552,6 +555,7 @@ fn is_known_event_name(event: &str) -> bool {
             | "agent.loop.detected"
             | "agent.turn.limit"
             | "agent.steering.injected"
+            | "agent.interrupt.injected"
             | "agent.steer.buffered"
             | "agent.steer.dropped"
             | "agent.compaction.started"
@@ -960,6 +964,29 @@ mod tests {
         assert!(matches!(
             &parsed.body,
             EventBody::RunSteer(props) if props.text == "try another approach"
+        ));
+        assert_eq!(parsed.to_value().unwrap(), line);
+    }
+
+    #[test]
+    fn agent_interrupt_injected_round_trips_with_stage_session_and_actor() {
+        let line = json!({
+            "id": "evt_interrupt_injected",
+            "ts": "2026-04-04T12:00:00Z",
+            "run_id": fixtures::RUN_1,
+            "event": "agent.interrupt.injected",
+            "node_id": "code",
+            "node_label": "code",
+            "stage_id": "code@2",
+            "session_id": "ses_1",
+            "actor": { "kind": "system", "system_kind": "engine" },
+            "properties": { "visit": 2 }
+        });
+
+        let parsed = RunEvent::from_value(line.clone()).unwrap();
+        assert!(matches!(
+            &parsed.body,
+            EventBody::AgentInterruptInjected(props) if props.visit == 2
         ));
         assert_eq!(parsed.to_value().unwrap(), line);
     }
