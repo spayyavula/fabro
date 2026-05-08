@@ -502,7 +502,23 @@ describe("turnsToStageKind", () => {
     expect(turnsToStageKind(eventsToActivity(events, "simplify"))).toBe("agent");
   });
 
-  test("defaults to agent for empty turns", () => {
-    expect(turnsToStageKind([])).toBe("agent");
+  test("classifies stages with no recognized turns as other", () => {
+    expect(turnsToStageKind([])).toBe("other");
+  });
+
+  test("treats interview-only events as an other stage", () => {
+    const events: EventEnvelope[] = [
+      envelope(1, {
+        event: "interview.started",
+        node_id: "yes_no",
+        properties: {},
+      }),
+      envelope(2, {
+        event: "interview.completed",
+        node_id: "yes_no",
+        properties: {},
+      }),
+    ];
+    expect(turnsToStageKind(eventsToActivity(events, "yes_no"))).toBe("other");
   });
 });

@@ -54,7 +54,7 @@ type TurnType =
     };
 
 type CommandTurn = Extract<TurnType, { kind: "command" }>;
-type StageKind = "agent" | "command";
+type StageKind = "agent" | "command" | "other";
 
 type PanelSelection =
   | { kind: "single"; turnIndex: number }
@@ -80,6 +80,10 @@ type EventsTab = (typeof EVENTS_TABS)[number];
 function eventsTabLabel(tab: EventsTab, stageKind: StageKind): string {
   if (tab === "debug") return "Debug";
   return stageKind === "command" ? "Logs" : "Transcript";
+}
+
+function stageHasExplicitRenderer(stageKind: StageKind): stageKind is "agent" | "command" {
+  return stageKind !== "other";
 }
 
 function assertNever(value: never): never {
@@ -215,6 +219,7 @@ export function eventsToActivity(events: EventEnvelope[], stageId: string): Turn
 }
 
 export function turnsToStageKind(turns: TurnType[]): StageKind {
+  if (turns.length === 0) return "other";
   let hasCommand = false;
   for (const t of turns) {
     if (t.kind === "assistant" || t.kind === "tool") return "agent";
@@ -1089,7 +1094,9 @@ function EventsToolbar({
 
   return (
     <div className="flex flex-wrap items-center gap-x-3 gap-y-2 pb-3">
-      <EventsTabToggle tab={tab} stageKind={stageKind} onTabChange={onTabChange} />
+      {stageHasExplicitRenderer(stageKind) && (
+        <EventsTabToggle tab={tab} stageKind={stageKind} onTabChange={onTabChange} />
+      )}
       {showFilters && (
         <div className="flex flex-1 flex-wrap items-center gap-2">
           {tab === "transcript" ? (
@@ -1177,6 +1184,7 @@ export default function RunStages() {
   }, [selectedStageId]);
 
   const [tab, setTab] = useState<EventsTab>("transcript");
+  const effectiveTab: EventsTab = stageKind === "other" ? "debug" : tab;
   const [selectedKinds, setSelectedKinds] = useState<EventKind[]>([
     ...EVENT_KINDS,
   ]);
@@ -1288,7 +1296,7 @@ export default function RunStages() {
         <div className="shrink-0 border-b border-line">
           <div className="pl-3 pr-4 sm:pr-6 lg:pr-8">
             <EventsToolbar
-              tab={tab}
+              tab={effectiveTab}
               stageKind={stageKind}
               commandTurn={commandTurn}
               onTabChange={setTab}
@@ -1299,14 +1307,14 @@ export default function RunStages() {
               availableDebugCategories={availableDebugCategories}
               search={search}
               onSearchChange={setSearch}
-              filteredCount={tab === "transcript" ? filteredTurns.length : filteredDebugEvents.length}
-              totalCount={tab === "transcript" ? turns.length : debugEvents.length}
+              filteredCount={effectiveTab === "transcript" ? filteredTurns.length : filteredDebugEvents.length}
+              totalCount={effectiveTab === "transcript" ? turns.length : debugEvents.length}
               model={stageModel}
             />
           </div>
         </div>
         <div className="min-h-0 flex-1 overflow-y-auto pt-2 pb-[calc(1.5rem+var(--fabro-interview-dock-clearance,0px))]">
-          {tab === "transcript" ? (
+          {effectiveTab === "transcript" ? (
             stageKind === "command" ? (
               <CommandLogs runId={id} stageId={selectedStage.id} turn={commandTurn} />
             ) : turns.length > 0 && filteredTurns.length === 0 ? (
@@ -1371,7 +1379,7 @@ export default function RunStages() {
         </div>
       </div>
 
-      {tab === "transcript" ? (
+      {effectiveTab === "transcript" ? (
         stageKind === "command" ? null : panelSelection?.kind === "group" ? (
           <ToolGroupDetailsPanel
             group={openGroup}
