@@ -22,6 +22,14 @@ function isInFlight(stage: RunBillingStage): boolean {
   return stage.state != null && IN_FLIGHT_STAGE_STATES.has(stage.state);
 }
 
+function hasBillableUsage(row: MappedStageRow): boolean {
+  return (
+    (row.inputTokens ?? 0) > 0 ||
+    (row.outputTokens ?? 0) > 0 ||
+    (row.totalUsdMicros ?? 0) > 0
+  );
+}
+
 interface MappedStageRow {
   stage:          string;
   model:          string | null;
@@ -136,7 +144,7 @@ export default function RunBilling({ params }: { params: { id: string } }) {
             </tr>
           </thead>
           <tbody>
-            {rows.map((row) => (
+            {rows.filter(hasBillableUsage).map((row) => (
               <tr key={row.stage} className="border-b border-line last:border-b-0">
                 <td className="px-4 py-3 text-fg-2">{row.stage}</td>
                 <td className="px-4 py-3 font-mono text-xs text-fg-3">
