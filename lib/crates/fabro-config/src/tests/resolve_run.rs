@@ -27,6 +27,92 @@ fn resolves_run_defaults_from_empty_settings() {
 }
 
 #[test]
+fn resolved_run_chat_surfaces_are_slack_only() {
+    let settings = WorkflowSettingsBuilder::from_toml(
+        r##"
+_version = 1
+
+[run.notifications.ops]
+enabled = true
+provider = "slack"
+events = ["run.completed"]
+
+[run.notifications.ops.slack]
+channel = "#ops"
+
+[run.interviews]
+provider = "slack"
+
+[run.interviews.slack]
+channel = "#ops"
+"##,
+    )
+    .expect("slack-only chat settings should resolve")
+    .run;
+
+    let route = settings
+        .notifications
+        .get("ops")
+        .expect("notification route should resolve");
+
+    assert_eq!(
+        serde_json::to_value(route).expect("route should serialize"),
+        serde_json::json!({
+            "enabled": true,
+            "provider": "slack",
+            "events": ["run.completed"],
+            "slack": {
+                "channel": "#ops",
+            },
+        })
+    );
+    assert_eq!(
+        serde_json::to_value(&settings.interviews).expect("interviews should serialize"),
+        serde_json::json!({
+            "provider": "slack",
+            "slack": {
+                "channel": "#ops",
+            },
+        })
+    );
+}
+
+#[test]
+fn parsing_rejects_unknown_run_chat_destinations() {
+    let notifications = r##"
+_version = 1
+
+[run.notifications.ops.chatapp]
+channel = "#ops"
+"##;
+
+    let err = notifications
+        .parse::<SettingsLayer>()
+        .expect_err("unknown notification destination should be rejected");
+    let message = err.to_string();
+    assert!(
+        message.contains("chatapp") || message.contains("unknown field"),
+        "expected notification parse error for unknown chat provider, got: {message}"
+    );
+
+    let interviews = r##"
+_version = 1
+
+[run.interviews.chatapp]
+channel = "#ops"
+"##;
+
+    let err = interviews
+        .parse::<SettingsLayer>()
+        .expect_err("unknown interview destination should be rejected");
+    let message = err.to_string();
+    assert!(
+        message.contains("chatapp") || message.contains("unknown field"),
+        "expected interview parse error for unknown chat provider, got: {message}"
+    );
+}
+
+#[test]
 fn resolves_explicit_stop_on_terminal_false() {
     let settings = WorkflowSettingsBuilder::from_toml(
         r"

@@ -29,12 +29,11 @@ pub use run::{
     ScmGitHubLayer, StringOrSplice,
 };
 pub use server::{
-    DiscordIntegrationLayer, GithubIntegrationLayer, IntegrationWebhooksLayer,
-    ObjectStoreLocalLayer, ObjectStoreS3Layer, ServerApiLayer, ServerArtifactsLayer,
-    ServerAuthGithubLayer, ServerAuthLayer, ServerIntegrationsLayer, ServerIpAllowlistLayer,
-    ServerIpAllowlistOverrideLayer, ServerLayer, ServerListenLayer, ServerLoggingLayer,
-    ServerSchedulerLayer, ServerSlateDbLayer, ServerStorageLayer, ServerWebLayer,
-    SlackIntegrationLayer, TeamsIntegrationLayer,
+    GithubIntegrationLayer, IntegrationWebhooksLayer, ObjectStoreLocalLayer, ObjectStoreS3Layer,
+    ServerApiLayer, ServerArtifactsLayer, ServerAuthGithubLayer, ServerAuthLayer,
+    ServerIntegrationsLayer, ServerIpAllowlistLayer, ServerIpAllowlistOverrideLayer, ServerLayer,
+    ServerListenLayer, ServerLoggingLayer, ServerSchedulerLayer, ServerSlateDbLayer,
+    ServerStorageLayer, ServerWebLayer, SlackIntegrationLayer,
 };
 pub(crate) use settings::SettingsLayer;
 pub use workflow::WorkflowLayer;

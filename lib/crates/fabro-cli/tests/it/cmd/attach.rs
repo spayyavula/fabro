@@ -945,10 +945,8 @@ fn attach_json_errors_without_prompting_for_human_input() {
                 }
               },
               "interviews": {
-                "discord": null,
                 "provider": null,
-                "slack": null,
-                "teams": null
+                "slack": null
               },
               "metadata": {},
               "model": {

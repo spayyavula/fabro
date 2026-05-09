@@ -242,8 +242,6 @@ fn resolve_notification_route(route: &NotificationRouteLayer) -> NotificationRou
             })
             .collect(),
         slack:    route.slack.as_ref().map(resolve_notification_provider),
-        discord:  route.discord.as_ref().map(resolve_notification_provider),
-        teams:    route.teams.as_ref().map(resolve_notification_provider),
     }
 }
 
@@ -263,8 +261,6 @@ fn resolve_interviews(interviews: Option<&InterviewsLayer>) -> RunInterviewsSett
     RunInterviewsSettings {
         provider: interviews.provider.clone(),
         slack:    interviews.slack.as_ref().map(resolve_interview_provider),
-        discord:  interviews.discord.as_ref().map(resolve_interview_provider),
-        teams:    interviews.teams.as_ref().map(resolve_interview_provider),
     }
 }
 

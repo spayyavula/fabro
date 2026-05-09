@@ -7771,16 +7771,12 @@ components:
 
     ServerIntegrationsSettings:
       type: object
-      required: [github, slack, discord, teams]
+      required: [github, slack]
       properties:
         github:
           $ref: "#/components/schemas/GithubIntegrationSettings"
         slack:
           $ref: "#/components/schemas/SlackIntegrationSettings"
-        discord:
-          $ref: "#/components/schemas/DiscordIntegrationSettings"
-        teams:
-          $ref: "#/components/schemas/TeamsIntegrationSettings"
 
     GithubIntegrationSettings:
       type: object
@@ -7819,20 +7815,6 @@ components:
           type: boolean
         default_channel:
           type: ["string", "null"]
-
-    DiscordIntegrationSettings:
-      type: object
-      required: [enabled]
-      properties:
-        enabled:
-          type: boolean
-
-    TeamsIntegrationSettings:
-      type: object
-      required: [enabled]
-      properties:
-        enabled:
-          type: boolean
 
     IntegrationWebhooksSettings:
       type: object
@@ -8218,7 +8200,7 @@ components:
 
     NotificationRouteSettings:
       type: object
-      required: [enabled, provider, events, slack, discord, teams]
+      required: [enabled, provider, events, slack]
       properties:
         enabled:
           type: boolean
@@ -8232,14 +8214,6 @@ components:
           oneOf:
             - $ref: "#/components/schemas/NotificationProviderSettings"
             - type: "null"
-        discord:
-          oneOf:
-            - $ref: "#/components/schemas/NotificationProviderSettings"
-            - type: "null"
-        teams:
-          oneOf:
-            - $ref: "#/components/schemas/NotificationProviderSettings"
-            - type: "null"
 
     NotificationProviderSettings:
       type: object
@@ -8250,19 +8224,11 @@ components:
 
     RunInterviewsSettings:
       type: object
-      required: [provider, slack, discord, teams]
+      required: [provider, slack]
       properties:
         provider:
           type: ["string", "null"]
         slack:
-          oneOf:
-            - $ref: "#/components/schemas/InterviewProviderSettings"
-            - type: "null"
-        discord:
-          oneOf:
-            - $ref: "#/components/schemas/InterviewProviderSettings"
-            - type: "null"
-        teams:
           oneOf:
             - $ref: "#/components/schemas/InterviewProviderSettings"
             - type: "null"

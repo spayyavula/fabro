@@ -334,13 +334,9 @@ pub struct NotificationRouteLayer {
     /// Raw Fabro event names. Splice marker supported at layering time.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub events:   Vec<StringOrSplice>,
-    /// Provider-specific destination subtables. First-pass chat providers.
+    /// Provider-specific destination subtables.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub slack:    Option<NotificationProviderLayer>,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub discord:  Option<NotificationProviderLayer>,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub teams:    Option<NotificationProviderLayer>,
 }
 
 /// A single string array entry that may be the splice marker.
@@ -386,10 +382,6 @@ pub struct InterviewsLayer {
     pub provider: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub slack:    Option<InterviewProviderLayer>,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub discord:  Option<InterviewProviderLayer>,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub teams:    Option<InterviewProviderLayer>,
 }
 
 #[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]

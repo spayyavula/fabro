@@ -302,8 +302,6 @@ pub struct NotificationRouteSettings {
     pub provider: Option<String>,
     pub events:   Vec<String>,
     pub slack:    Option<NotificationProviderSettings>,
-    pub discord:  Option<NotificationProviderSettings>,
-    pub teams:    Option<NotificationProviderSettings>,
 }
 
 #[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
@@ -315,8 +313,6 @@ pub struct NotificationProviderSettings {
 pub struct RunInterviewsSettings {
     pub provider: Option<String>,
     pub slack:    Option<InterviewProviderSettings>,
-    pub discord:  Option<InterviewProviderSettings>,
-    pub teams:    Option<InterviewProviderSettings>,
 }
 
 #[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]

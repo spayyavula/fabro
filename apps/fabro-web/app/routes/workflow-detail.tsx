@@ -84,7 +84,7 @@ function sampleSettings({
         },
       },
       notifications: {},
-      interviews: { provider: null, slack: null, discord: null, teams: null },
+      interviews: { provider: null, slack: null },
       agent: { permissions: null, mcps: {} },
       hooks: [],
       scm: { provider: null, owner: null, repository: null, github: null },

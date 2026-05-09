@@ -77,7 +77,6 @@ models/diff-file.ts
 models/diff-stats.ts
 models/diff-summary.ts
 models/dirty-status.ts
-models/discord-integration-settings.ts
 models/disk-usage-response.ts
 models/disk-usage-run-row.ts
 models/disk-usage-summary-row.ts
@@ -327,7 +326,6 @@ models/system-info-response.ts
 models/system-repair-run-issue.ts
 models/system-repair-runs-response.ts
 models/system-run-counts.ts
-models/teams-integration-settings.ts
 models/terminal-status.ts
 models/timeline-entry-response.ts
 models/tls-mode.ts
