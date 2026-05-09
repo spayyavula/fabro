@@ -19,7 +19,7 @@ import { useRunState } from "../lib/queries";
 
 export const handle = { wide: true, fullHeight: true };
 export const TERMINAL_DOCK_CLEARANCE_CLASS =
-  "pb-[calc(1.5rem+var(--fabro-interview-dock-clearance,0px))]";
+  "pb-[calc(0.5rem+var(--fabro-interview-dock-clearance,0px))]";
 
 type ConnectionStatus = "connecting" | "ready" | "closed" | "error";
 
