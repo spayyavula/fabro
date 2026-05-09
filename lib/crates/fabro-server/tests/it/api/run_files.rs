@@ -29,6 +29,10 @@ fn files_url(run_id: &str) -> String {
     api(&format!("/runs/{run_id}/files"))
 }
 
+fn commits_url(run_id: &str) -> String {
+    api(&format!("/runs/{run_id}/commits"))
+}
+
 fn files_url_with_scope(run_id: &str, scope: &str) -> String {
     format!("{}?scope={scope}", files_url(run_id))
 }
@@ -407,4 +411,42 @@ async fn response_envelope_matches_openapi_paginated_run_file_list_shape() {
         assert!(entry["new_file"]["name"].is_string());
         assert!(entry["new_file"]["contents"].is_string());
     }
+}
+
+#[tokio::test]
+async fn commit_response_envelope_matches_openapi_paginated_run_commit_list_shape() {
+    // Sanity check that the commits route is wired and returns the envelope
+    // shape generated into the TypeScript client. Demo mode keeps this
+    // route-level test deterministic without requiring a live sandbox.
+    let app = fabro_server::test_support::build_test_router(test_app_state());
+    let req = Request::builder()
+        .method("GET")
+        .uri(commits_url("whatever"))
+        .header("x-fabro-demo", "1")
+        .body(Body::empty())
+        .unwrap();
+    let resp = app.oneshot(req).await.unwrap();
+    let body = response_json(resp, StatusCode::OK, "GET /api/v1/runs/whatever/commits").await;
+
+    assert!(body["data"].is_array());
+    assert!(body["meta"].is_object());
+    assert_eq!(body["meta"]["source"].as_str(), Some("sandbox"));
+    assert!(body["meta"]["base_sha"].is_string());
+    assert!(body["meta"]["head_sha"].is_string());
+    assert!(body["meta"]["limit"].is_number());
+    assert!(body["meta"]["total_returned"].is_number());
+    assert!(body["meta"]["truncated"].is_boolean());
+
+    let data = body["data"].as_array().expect("data array");
+    assert_eq!(data.len(), 1, "demo commits fixture should have one commit");
+    let commit = &data[0];
+    assert!(commit["sha"].is_string());
+    assert!(commit["short_sha"].is_string());
+    assert!(commit["parents"].is_array());
+    assert!(commit["author"].is_object());
+    assert!(commit["committer"].is_object());
+    assert!(commit["subject"].is_string());
+    assert!(commit["message"].is_string());
+    assert!(commit["trailers"].is_object());
+    assert!(commit["tree_sha"].is_string());
 }
