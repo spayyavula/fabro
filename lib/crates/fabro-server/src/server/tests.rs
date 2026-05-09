@@ -7249,6 +7249,150 @@ async fn delete_run_removes_durable_run() {
 }
 
 #[tokio::test]
+async fn delete_run_with_preserved_sandbox_returns_handoff() {
+    let state = test_app_state();
+    let app = crate::test_support::build_test_router(Arc::clone(&state));
+    let run_id = RunId::new();
+    let mut settings = fabro_types::WorkflowSettings::default();
+    settings.run.sandbox.preserve = true;
+    let graph = Graph::new("test");
+
+    create_durable_run_with_events(&state, run_id, &[
+        workflow_event::Event::RunCreated {
+            run_id,
+            settings: serde_json::to_value(settings).unwrap(),
+            graph: serde_json::to_value(graph).unwrap(),
+            workflow_source: None,
+            workflow_config: None,
+            labels: std::collections::BTreeMap::default(),
+            run_dir: "/tmp/fabro-run".to_string(),
+            source_directory: Some("/tmp/fabro-run".to_string()),
+            workflow_slug: Some("test".to_string()),
+            db_prefix: None,
+            provenance: None,
+            manifest_blob: None,
+            git: None,
+            fork_source_ref: None,
+            in_place: false,
+            web_url: None,
+        },
+        workflow_event::Event::RunSubmitted {
+            definition_blob: None,
+        },
+        workflow_event::Event::SandboxInitialized {
+            provider:          "local".to_string(),
+            working_directory: "/tmp/fabro-preserved-sandbox".to_string(),
+            identifier:        Some("sandbox-preserve-1".to_string()),
+            repo_cloned:       None,
+            clone_origin_url:  None,
+            clone_branch:      None,
+        },
+    ])
+    .await;
+
+    let req = Request::builder()
+        .method("DELETE")
+        .uri(api(&format!("/runs/{run_id}?force=true")))
+        .body(Body::empty())
+        .unwrap();
+    let response = app.clone().oneshot(req).await.unwrap();
+    let body = response_json!(response, StatusCode::OK).await;
+    assert_eq!(body["deleted"].as_bool(), Some(true));
+    assert_eq!(body["sandbox_preserved"].as_bool(), Some(true));
+    assert_eq!(body["sandbox"]["provider"].as_str(), Some("local"));
+    assert_eq!(
+        body["sandbox"]["identifier"].as_str(),
+        Some("sandbox-preserve-1")
+    );
+
+    let req = Request::builder()
+        .method("GET")
+        .uri(api(&format!("/runs/{run_id}")))
+        .body(Body::empty())
+        .unwrap();
+    let response = app.oneshot(req).await.unwrap();
+    assert_status!(response, StatusCode::NOT_FOUND).await;
+}
+
+#[tokio::test]
+async fn delete_run_retry_after_missing_provider_resource_removes_metadata() {
+    let state = test_app_state();
+    let app = crate::test_support::build_test_router(Arc::clone(&state));
+    let run_id = RunId::new();
+    let graph = Graph::new("test");
+
+    create_durable_run_with_events(&state, run_id, &[
+        workflow_event::Event::RunCreated {
+            run_id,
+            settings: serde_json::to_value(fabro_types::WorkflowSettings::default()).unwrap(),
+            graph: serde_json::to_value(graph).unwrap(),
+            workflow_source: None,
+            workflow_config: None,
+            labels: std::collections::BTreeMap::default(),
+            run_dir: "/tmp/fabro-run".to_string(),
+            source_directory: Some("/tmp/fabro-run".to_string()),
+            workflow_slug: Some("test".to_string()),
+            db_prefix: None,
+            provenance: None,
+            manifest_blob: None,
+            git: None,
+            fork_source_ref: None,
+            in_place: false,
+            web_url: None,
+        },
+        workflow_event::Event::RunSubmitted {
+            definition_blob: None,
+        },
+        workflow_event::Event::RunStarting,
+        workflow_event::Event::RunRunning,
+        workflow_event::Event::SandboxInitialized {
+            provider:          "missing-provider".to_string(),
+            working_directory: "/tmp/fabro-missing-sandbox".to_string(),
+            identifier:        Some("missing-sandbox".to_string()),
+            repo_cloned:       None,
+            clone_origin_url:  None,
+            clone_branch:      None,
+        },
+        workflow_event::Event::WorkflowRunCompleted {
+            duration_ms:          1,
+            artifact_count:       0,
+            status:               "succeeded".to_string(),
+            reason:               SuccessReason::Completed,
+            total_usd_micros:     None,
+            final_git_commit_sha: None,
+            final_patch:          None,
+            diff_summary:         None,
+            billing:              None,
+        },
+    ])
+    .await;
+
+    let req = Request::builder()
+        .method("DELETE")
+        .uri(api(&format!("/runs/{run_id}")))
+        .body(Body::empty())
+        .unwrap();
+    let response = app.clone().oneshot(req).await.unwrap();
+    response_json!(response, StatusCode::CONFLICT).await;
+
+    let req = Request::builder()
+        .method("DELETE")
+        .uri(api(&format!("/runs/{run_id}")))
+        .body(Body::empty())
+        .unwrap();
+    let response = app.clone().oneshot(req).await.unwrap();
+    assert_status!(response, StatusCode::NO_CONTENT).await;
+
+    let req = Request::builder()
+        .method("GET")
+        .uri(api(&format!("/runs/{run_id}")))
+        .body(Body::empty())
+        .unwrap();
+    let response = app.oneshot(req).await.unwrap();
+    assert_status!(response, StatusCode::NOT_FOUND).await;
+}
+
+#[tokio::test]
 async fn delete_active_run_requires_force() {
     let state = test_app_state();
     let app = crate::test_support::build_test_router(Arc::clone(&state));

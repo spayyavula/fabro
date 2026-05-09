@@ -26,6 +26,8 @@ import type { CloseRunPullRequestResponse } from '../models';
 // @ts-ignore
 import type { CreateRunPullRequestRequest } from '../models';
 // @ts-ignore
+import type { DeleteRunResponse } from '../models';
+// @ts-ignore
 import type { ErrorResponse } from '../models';
 // @ts-ignore
 import type { ForkRequest } from '../models';
@@ -275,7 +277,7 @@ export const RunsApiAxiosParamCreator = function (configuration?: Configuration)
             };
         },
         /**
-         * Deletes durable store state for a run. This does not remove any local run directory. Active runs require `force=true`.
+         * Deletes durable store state, local run scratch data, and the run-owned sandbox unless sandbox preservation is enabled. Active runs require `force=true`.
          * @summary Delete Run
          * @param {string} id Unique run identifier (ULID).
          * @param {boolean} [force] Whether to force deletion of an active run. Defaults to &#x60;false&#x60;.
@@ -1162,14 +1164,14 @@ export const RunsApiFp = function(configuration?: Configuration) {
             return (axios, basePath) => createRequestFunction(localVarAxiosArgs, globalAxios, BASE_PATH, configuration)(axios, localVarOperationServerBasePath || basePath);
         },
         /**
-         * Deletes durable store state for a run. This does not remove any local run directory. Active runs require `force=true`.
+         * Deletes durable store state, local run scratch data, and the run-owned sandbox unless sandbox preservation is enabled. Active runs require `force=true`.
          * @summary Delete Run
          * @param {string} id Unique run identifier (ULID).
          * @param {boolean} [force] Whether to force deletion of an active run. Defaults to &#x60;false&#x60;.
          * @param {*} [options] Override http request option.
          * @throws {RequiredError}
          */
-        async deleteRun(id: string, force?: boolean, options?: RawAxiosRequestConfig): Promise<(axios?: AxiosInstance, basePath?: string) => AxiosPromise<void>> {
+        async deleteRun(id: string, force?: boolean, options?: RawAxiosRequestConfig): Promise<(axios?: AxiosInstance, basePath?: string) => AxiosPromise<DeleteRunResponse>> {
             const localVarAxiosArgs = await localVarAxiosParamCreator.deleteRun(id, force, options);
             const localVarOperationServerIndex = configuration?.serverIndex ?? 0;
             const localVarOperationServerBasePath = operationServerMap['RunsApi.deleteRun']?.[localVarOperationServerIndex]?.url;
@@ -1479,14 +1481,14 @@ export const RunsApiFactory = function (configuration?: Configuration, basePath?
             return localVarFp.createRunPullRequest(id, createRunPullRequestRequest, options).then((request) => request(axios, basePath));
         },
         /**
-         * Deletes durable store state for a run. This does not remove any local run directory. Active runs require `force=true`.
+         * Deletes durable store state, local run scratch data, and the run-owned sandbox unless sandbox preservation is enabled. Active runs require `force=true`.
          * @summary Delete Run
          * @param {string} id Unique run identifier (ULID).
          * @param {boolean} [force] Whether to force deletion of an active run. Defaults to &#x60;false&#x60;.
          * @param {*} [options] Override http request option.
          * @throws {RequiredError}
          */
-        deleteRun(id: string, force?: boolean, options?: RawAxiosRequestConfig): AxiosPromise<void> {
+        deleteRun(id: string, force?: boolean, options?: RawAxiosRequestConfig): AxiosPromise<DeleteRunResponse> {
             return localVarFp.deleteRun(id, force, options).then((request) => request(axios, basePath));
         },
         /**
@@ -1742,7 +1744,7 @@ export class RunsApi extends BaseAPI {
     }
 
     /**
-     * Deletes durable store state for a run. This does not remove any local run directory. Active runs require `force=true`.
+     * Deletes durable store state, local run scratch data, and the run-owned sandbox unless sandbox preservation is enabled. Active runs require `force=true`.
      * @summary Delete Run
      * @param {string} id Unique run identifier (ULID).
      * @param {boolean} [force] Whether to force deletion of an active run. Defaults to &#x60;false&#x60;.

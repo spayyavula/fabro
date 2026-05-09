@@ -40,6 +40,8 @@ export * from './daytona-network-layer-one-of';
 export * from './daytona-network-layer-one-of-allow-list';
 export * from './daytona-settings';
 export * from './daytona-snapshot-settings';
+export * from './delete-run-response';
+export * from './delete-run-sandbox';
 export * from './delete-secret-request';
 export * from './demo-toggle-request';
 export * from './demo-toggle-response';

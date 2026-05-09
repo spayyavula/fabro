@@ -62,6 +62,8 @@ models/daytona-network-layer-one-of.ts
 models/daytona-network-layer.ts
 models/daytona-settings.ts
 models/daytona-snapshot-settings.ts
+models/delete-run-response.ts
+models/delete-run-sandbox.ts
 models/delete-secret-request.ts
 models/demo-toggle-request.ts
 models/demo-toggle-response.ts

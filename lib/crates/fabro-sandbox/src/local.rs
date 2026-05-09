@@ -620,6 +620,10 @@ impl Sandbox for LocalSandbox {
         Ok(())
     }
 
+    async fn delete(&self) -> crate::Result<()> {
+        Ok(())
+    }
+
     fn working_directory(&self) -> &str {
         self.working_directory.to_str().unwrap_or(".")
     }

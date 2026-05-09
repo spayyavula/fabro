@@ -782,6 +782,69 @@ fn event_body_from_event(event: &Event) -> EventBody {
                 error:    error.clone(),
                 causes:   causes.clone(),
             }),
+            SandboxEvent::StartStarted { provider } => {
+                EventBody::SandboxStartStarted(fabro_types::SandboxStartStartedProps {
+                    provider: provider.clone(),
+                })
+            }
+            SandboxEvent::StartCompleted {
+                provider,
+                duration_ms,
+            } => EventBody::SandboxStartCompleted(fabro_types::SandboxStartCompletedProps {
+                provider:    provider.clone(),
+                duration_ms: *duration_ms,
+            }),
+            SandboxEvent::StartFailed {
+                provider,
+                error,
+                causes,
+            } => EventBody::SandboxStartFailed(fabro_types::SandboxStartFailedProps {
+                provider: provider.clone(),
+                error:    error.clone(),
+                causes:   causes.clone(),
+            }),
+            SandboxEvent::StopStarted { provider } => {
+                EventBody::SandboxStopStarted(fabro_types::SandboxStopStartedProps {
+                    provider: provider.clone(),
+                })
+            }
+            SandboxEvent::StopCompleted {
+                provider,
+                duration_ms,
+            } => EventBody::SandboxStopCompleted(fabro_types::SandboxStopCompletedProps {
+                provider:    provider.clone(),
+                duration_ms: *duration_ms,
+            }),
+            SandboxEvent::StopFailed {
+                provider,
+                error,
+                causes,
+            } => EventBody::SandboxStopFailed(fabro_types::SandboxStopFailedProps {
+                provider: provider.clone(),
+                error:    error.clone(),
+                causes:   causes.clone(),
+            }),
+            SandboxEvent::DeleteStarted { provider } => {
+                EventBody::SandboxDeleteStarted(fabro_types::SandboxDeleteStartedProps {
+                    provider: provider.clone(),
+                })
+            }
+            SandboxEvent::DeleteCompleted {
+                provider,
+                duration_ms,
+            } => EventBody::SandboxDeleteCompleted(fabro_types::SandboxDeleteCompletedProps {
+                provider:    provider.clone(),
+                duration_ms: *duration_ms,
+            }),
+            SandboxEvent::DeleteFailed {
+                provider,
+                error,
+                causes,
+            } => EventBody::SandboxDeleteFailed(fabro_types::SandboxDeleteFailedProps {
+                provider: provider.clone(),
+                error:    error.clone(),
+                causes:   causes.clone(),
+            }),
             SandboxEvent::SnapshotPulling { name } => {
                 EventBody::SnapshotPulling(fabro_types::SnapshotNameProps { name: name.clone() })
             }
@@ -1429,6 +1492,25 @@ mod tests {
         let properties = stored.properties().unwrap();
         assert_eq!(properties["provider"], "daytona");
         assert_eq!(properties["duration_ms"], 2500);
+    }
+
+    #[test]
+    fn run_event_sandbox_stop_and_delete_use_distinct_event_names() {
+        let stopped = to_run_event(&fixtures::RUN_5, &Event::Sandbox {
+            event: SandboxEvent::StopCompleted {
+                provider:    "docker".to_string(),
+                duration_ms: 10,
+            },
+        });
+        let deleted = to_run_event(&fixtures::RUN_5, &Event::Sandbox {
+            event: SandboxEvent::DeleteCompleted {
+                provider:    "docker".to_string(),
+                duration_ms: 20,
+            },
+        });
+
+        assert_eq!(stopped.event_name(), "sandbox.stop.completed");
+        assert_eq!(deleted.event_name(), "sandbox.delete.completed");
     }
 
     #[test]

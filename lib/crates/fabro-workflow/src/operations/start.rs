@@ -76,6 +76,7 @@ struct RunSession {
     registry_override: Option<Arc<HandlerRegistry>>,
     retro_enabled:     bool,
     preserve_sandbox:  bool,
+    stop_on_terminal:  bool,
     pr_config:         Option<PullRequestSettings>,
     pr_github_app:     Option<fabro_github::GitHubCredentials>,
     pr_origin_url:     Option<String>,
@@ -451,6 +452,7 @@ impl RunSession {
             registry_override: services.registry_override,
             retro_enabled: resolved.execution.retros && project_config::is_retro_enabled(),
             preserve_sandbox: resolved.sandbox.preserve,
+            stop_on_terminal: resolved.sandbox.stop_on_terminal,
             pr_config,
             pr_github_app: services.github_app,
             pr_origin_url: record.repo_origin_url().map(str::to_string),
@@ -692,7 +694,6 @@ impl RunSession {
         persisted: Persisted,
         checkpoint: Option<Checkpoint>,
     ) -> Result<Started, Error> {
-        let preserve_sandbox = self.preserve_sandbox;
         let on_node = self.on_node.clone();
 
         let record = persisted.run_spec();
@@ -770,13 +771,14 @@ impl RunSession {
         initialized.on_node = on_node;
 
         let sandbox_for_cleanup = Arc::clone(&initialized.engine.run.sandbox);
+        let stop_on_terminal = self.stop_on_terminal;
         let cleanup_guard = scopeguard::guard((), move |()| {
-            if preserve_sandbox {
+            if !stop_on_terminal {
                 return;
             }
             if let Ok(handle) = Handle::try_current() {
                 handle.spawn(async move {
-                    let _ = sandbox_for_cleanup.cleanup().await;
+                    let _ = sandbox_for_cleanup.stop().await;
                 });
             }
         });
@@ -817,6 +819,7 @@ impl RunSession {
             run_id:           retroed.run_options.run_id,
             workflow_name:    retroed.graph.name.clone(),
             preserve_sandbox: self.preserve_sandbox,
+            stop_on_terminal: self.stop_on_terminal,
             last_git_sha:     last_git_sha.lock().unwrap().clone(),
         };
         let pr_opts = PullRequestOptions {

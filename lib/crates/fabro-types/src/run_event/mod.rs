@@ -218,6 +218,24 @@ pub enum EventBody {
     SandboxCleanupCompleted(SandboxCleanupCompletedProps),
     #[serde(rename = "sandbox.cleanup.failed")]
     SandboxCleanupFailed(SandboxCleanupFailedProps),
+    #[serde(rename = "sandbox.start.started")]
+    SandboxStartStarted(SandboxStartStartedProps),
+    #[serde(rename = "sandbox.start.completed")]
+    SandboxStartCompleted(SandboxStartCompletedProps),
+    #[serde(rename = "sandbox.start.failed")]
+    SandboxStartFailed(SandboxStartFailedProps),
+    #[serde(rename = "sandbox.stop.started")]
+    SandboxStopStarted(SandboxStopStartedProps),
+    #[serde(rename = "sandbox.stop.completed")]
+    SandboxStopCompleted(SandboxStopCompletedProps),
+    #[serde(rename = "sandbox.stop.failed")]
+    SandboxStopFailed(SandboxStopFailedProps),
+    #[serde(rename = "sandbox.delete.started")]
+    SandboxDeleteStarted(SandboxDeleteStartedProps),
+    #[serde(rename = "sandbox.delete.completed")]
+    SandboxDeleteCompleted(SandboxDeleteCompletedProps),
+    #[serde(rename = "sandbox.delete.failed")]
+    SandboxDeleteFailed(SandboxDeleteFailedProps),
     #[serde(rename = "sandbox.snapshot.pulling")]
     SnapshotPulling(SnapshotNameProps),
     #[serde(rename = "sandbox.snapshot.creating")]
@@ -434,6 +452,15 @@ impl EventBody {
             Self::SandboxCleanupStarted(_) => "sandbox.cleanup.started",
             Self::SandboxCleanupCompleted(_) => "sandbox.cleanup.completed",
             Self::SandboxCleanupFailed(_) => "sandbox.cleanup.failed",
+            Self::SandboxStartStarted(_) => "sandbox.start.started",
+            Self::SandboxStartCompleted(_) => "sandbox.start.completed",
+            Self::SandboxStartFailed(_) => "sandbox.start.failed",
+            Self::SandboxStopStarted(_) => "sandbox.stop.started",
+            Self::SandboxStopCompleted(_) => "sandbox.stop.completed",
+            Self::SandboxStopFailed(_) => "sandbox.stop.failed",
+            Self::SandboxDeleteStarted(_) => "sandbox.delete.started",
+            Self::SandboxDeleteCompleted(_) => "sandbox.delete.completed",
+            Self::SandboxDeleteFailed(_) => "sandbox.delete.failed",
             Self::SnapshotPulling(_) => "sandbox.snapshot.pulling",
             Self::SnapshotCreating(_) => "sandbox.snapshot.creating",
             Self::SnapshotReady(_) => "sandbox.snapshot.ready",
@@ -575,6 +602,15 @@ fn is_known_event_name(event: &str) -> bool {
             | "sandbox.cleanup.started"
             | "sandbox.cleanup.completed"
             | "sandbox.cleanup.failed"
+            | "sandbox.start.started"
+            | "sandbox.start.completed"
+            | "sandbox.start.failed"
+            | "sandbox.stop.started"
+            | "sandbox.stop.completed"
+            | "sandbox.stop.failed"
+            | "sandbox.delete.started"
+            | "sandbox.delete.completed"
+            | "sandbox.delete.failed"
             | "sandbox.snapshot.pulling"
             | "sandbox.snapshot.creating"
             | "sandbox.snapshot.ready"

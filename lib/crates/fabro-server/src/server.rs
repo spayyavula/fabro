@@ -58,7 +58,7 @@ use fabro_llm::types::{
 use fabro_model::{BilledTokenCounts, Catalog, ModelTestMode, Provider};
 use fabro_redact::redact_jsonl_line;
 use fabro_sandbox::daytona::{self, DaytonaSandbox};
-use fabro_sandbox::reconnect::reconnect;
+use fabro_sandbox::reconnect::reconnect_for_run;
 use fabro_sandbox::{Sandbox, SandboxProvider};
 use fabro_slack::client::{PostedMessage as SlackPostedMessage, SlackClient};
 use fabro_slack::config::resolve_credentials as resolve_slack_credentials;
@@ -96,6 +96,7 @@ use fabro_workflow::run_lookup::{
 };
 use fabro_workflow::run_status::{FailureReason, RunStatus, SuccessReason};
 use fabro_workflow::{Error as WorkflowError, operations, pull_request};
+use serde::Serialize;
 use sha2::{Digest, Sha256};
 use tempfile::NamedTempFile;
 use tokio::fs;
@@ -1590,22 +1591,40 @@ pub(crate) fn build_app_state(config: AppStateConfig) -> anyhow::Result<Arc<AppS
 
 const MAX_PAGE_OFFSET: u32 = 1_000_000;
 
+#[derive(Serialize)]
+struct DeleteRunResponse {
+    deleted:           bool,
+    sandbox_preserved: bool,
+    sandbox:           DeleteRunSandboxResponse,
+}
+
+#[derive(Serialize)]
+struct DeleteRunSandboxResponse {
+    provider:   String,
+    identifier: String,
+}
+
+enum DeleteRunOutcome {
+    NoContent,
+    Preserved(DeleteRunResponse),
+}
+
 async fn delete_run_internal(
     state: &Arc<AppState>,
     id: RunId,
     force: bool,
-) -> Result<(), Response> {
+) -> Result<DeleteRunOutcome, Response> {
     if !force {
         reject_active_delete_without_force(state.as_ref(), &id).await?;
     }
 
-    let managed_run = if let Ok(mut runs) = state.runs.lock() {
+    let mut managed_run = if let Ok(mut runs) = state.runs.lock() {
         runs.remove(&id)
     } else {
         None
     };
 
-    if let Some(mut managed_run) = managed_run {
+    if let Some(managed_run) = managed_run.as_mut() {
         if let Some(token) = &managed_run.cancel_token {
             token.cancel();
         }
@@ -1636,6 +1655,11 @@ async fn delete_run_internal(
             delete_grace,
         )
         .await;
+    }
+
+    let delete_outcome = delete_run_sandbox_resource(state, id, force).await?;
+
+    if let Some(mut managed_run) = managed_run {
         if let Some(run_dir) = managed_run.run_dir.take() {
             remove_run_dir(&run_dir).map_err(|err| {
                 ApiError::new(StatusCode::INTERNAL_SERVER_ERROR, err.to_string()).into_response()
@@ -1659,7 +1683,82 @@ async fn delete_run_internal(
         .map_err(|err| {
             ApiError::new(StatusCode::INTERNAL_SERVER_ERROR, err.to_string()).into_response()
         })?;
-    Ok(())
+    Ok(delete_outcome)
+}
+
+async fn delete_run_sandbox_resource(
+    state: &Arc<AppState>,
+    id: RunId,
+    force: bool,
+) -> Result<DeleteRunOutcome, Response> {
+    let Ok(run_store) = state.store.open_run(&id).await else {
+        return Ok(DeleteRunOutcome::NoContent);
+    };
+    let projection = run_store.state().await.map_err(|err| {
+        ApiError::new(StatusCode::INTERNAL_SERVER_ERROR, err.to_string()).into_response()
+    })?;
+    let delete_started = matches!(projection.status, Some(RunStatus::Removing));
+    let can_mark_removing = projection
+        .status
+        .is_some_and(|status| status.can_transition_to(RunStatus::Removing));
+    if !delete_started && can_mark_removing {
+        workflow_event::append_event(&run_store, &id, &workflow_event::Event::RunRemoving)
+            .await
+            .map_err(|err| {
+                ApiError::new(StatusCode::INTERNAL_SERVER_ERROR, err.to_string()).into_response()
+            })?;
+    }
+
+    let preserve = projection
+        .spec()
+        .is_some_and(|spec| spec.settings.run.sandbox.preserve);
+    let Some(record) = projection.sandbox else {
+        return Ok(DeleteRunOutcome::NoContent);
+    };
+    if preserve {
+        let identifier = record
+            .identifier
+            .clone()
+            .unwrap_or_else(|| record.working_directory.clone());
+        return Ok(DeleteRunOutcome::Preserved(DeleteRunResponse {
+            deleted:           true,
+            sandbox_preserved: true,
+            sandbox:           DeleteRunSandboxResponse {
+                provider: record.provider,
+                identifier,
+            },
+        }));
+    }
+
+    let daytona_api_key = state.vault_or_env(EnvVars::DAYTONA_API_KEY);
+    let sandbox = match reconnect_for_run(&record, daytona_api_key, Some(id)).await {
+        Ok(sandbox) => sandbox,
+        Err(err) if force || delete_started => {
+            tracing::warn!(
+                run_id = %id,
+                error = %render_with_causes(&err.to_string(), &collect_causes(err.as_ref())),
+                "Skipping sandbox provider delete during run deletion"
+            );
+            return Ok(DeleteRunOutcome::NoContent);
+        }
+        Err(err) => {
+            let detail = render_with_causes(&err.to_string(), &collect_causes(err.as_ref()));
+            return Err(ApiError::new(StatusCode::CONFLICT, detail).into_response());
+        }
+    };
+    if let Err(err) = sandbox.delete().await {
+        if force || delete_started {
+            tracing::warn!(
+                run_id = %id,
+                error = %err.display_with_causes(),
+                "Skipping failed sandbox provider delete during run deletion"
+            );
+            return Ok(DeleteRunOutcome::NoContent);
+        }
+        return Err(ApiError::new(StatusCode::CONFLICT, err.display_with_causes()).into_response());
+    }
+
+    Ok(DeleteRunOutcome::NoContent)
 }
 
 async fn reject_active_delete_without_force(
@@ -1691,11 +1790,23 @@ async fn reject_active_delete_without_force(
     }
 
     match state.store.runs().find(run_id).await {
-        Ok(Some(summary)) if summary.status.is_active() => Err(ApiError::new(
-            StatusCode::CONFLICT,
-            active_run_delete_message(*run_id, summary.status),
-        )
-        .into_response()),
+        Ok(Some(summary))
+            if matches!(
+                summary.status,
+                RunStatus::Submitted
+                    | RunStatus::Queued
+                    | RunStatus::Starting
+                    | RunStatus::Running
+                    | RunStatus::Blocked { .. }
+                    | RunStatus::Paused { .. }
+            ) =>
+        {
+            Err(ApiError::new(
+                StatusCode::CONFLICT,
+                active_run_delete_message(*run_id, summary.status),
+            )
+            .into_response())
+        }
         Ok(_) => Ok(()),
         Err(err) => {
             Err(ApiError::new(StatusCode::INTERNAL_SERVER_ERROR, err.to_string()).into_response())

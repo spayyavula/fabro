@@ -1652,13 +1652,14 @@ mod runs {
                     timeout_ms: 120_000,
                 },
                 sandbox: RunSandboxSettings {
-                    provider:     "daytona".into(),
-                    preserve:     false,
-                    devcontainer: false,
-                    env:          HashMap::new(),
-                    local:        LocalSandboxSettings::default(),
-                    docker:       None,
-                    daytona:      Some(DaytonaSettings {
+                    provider:         "daytona".into(),
+                    preserve:         false,
+                    stop_on_terminal: true,
+                    devcontainer:     false,
+                    env:              HashMap::new(),
+                    local:            LocalSandboxSettings::default(),
+                    docker:           None,
+                    daytona:          Some(DaytonaSettings {
                         auto_stop_interval: Some(60),
                         labels:             HashMap::from([(
                             "project".to_string(),

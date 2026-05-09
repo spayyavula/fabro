@@ -499,11 +499,11 @@ pub(crate) fn build_terminal_event(
     }
 }
 
-async fn cleanup_sandbox(
+async fn stop_sandbox_on_terminal(
     services: &RunServices,
     run_id: &fabro_types::RunId,
     workflow_name: &str,
-    preserve: bool,
+    stop_on_terminal: bool,
 ) -> fabro_sandbox::Result<()> {
     let hook_ctx = HookContext::new(
         HookEvent::SandboxCleanup,
@@ -511,8 +511,8 @@ async fn cleanup_sandbox(
         workflow_name.to_string(),
     );
     let _ = services.run_hooks(&hook_ctx).await;
-    if !preserve {
-        services.sandbox.cleanup().await?;
+    if stop_on_terminal {
+        services.sandbox.stop().await?;
     }
     Ok(())
 }
@@ -602,20 +602,20 @@ pub async fn finalize(retroed: Retroed, options: &FinalizeOptions) -> Result<Con
             message,
         );
     }
-    if let Err(e) = cleanup_sandbox(
+    if let Err(e) = stop_sandbox_on_terminal(
         &services,
         &options.run_id,
         &options.workflow_name,
-        options.preserve_sandbox,
+        options.stop_on_terminal,
     )
     .await
     {
-        tracing::warn!(error = %fabro_sandbox::display_for_log(&e), "Sandbox cleanup failed");
+        tracing::warn!(error = %fabro_sandbox::display_for_log(&e), "Sandbox stop failed");
         let exec_output_tail = fabro_sandbox::default_redacted_output_tail(&e);
         services.emitter.notice_with_tail(
             RunNoticeLevel::Warn,
             RunNoticeCode::SandboxCleanupFailed,
-            format!("sandbox cleanup failed: {}", e.display_with_causes()),
+            format!("sandbox stop failed: {}", e.display_with_causes()),
             exec_output_tail,
         );
     }
@@ -640,6 +640,7 @@ mod tests {
     use async_trait::async_trait;
     use bytes::Bytes;
     use fabro_graphviz::graph::Graph;
+    use fabro_sandbox::test_support::MockSandbox;
     use fabro_store::{Database, EventEnvelope, RunDatabase, RunProjection};
     use fabro_types::run_event::{MetadataSnapshotFailureKind, MetadataSnapshotPhase};
     use fabro_types::{
@@ -1021,6 +1022,7 @@ mod tests {
             run_id:           test_run_id(),
             workflow_name:    "test".to_string(),
             preserve_sandbox: true,
+            stop_on_terminal: true,
             last_git_sha:     None,
         })
         .await
@@ -1199,6 +1201,7 @@ mod tests {
             run_id:           test_run_id(),
             workflow_name:    "test".to_string(),
             preserve_sandbox: false,
+            stop_on_terminal: true,
             last_git_sha:     None,
         })
         .await
@@ -1215,6 +1218,76 @@ mod tests {
             "metadata.snapshot.completed",
             "run.completed",
         ]);
+    }
+
+    #[tokio::test]
+    async fn finalize_stops_sandbox_on_terminal_without_deleting() {
+        let repo_dir = tempfile::tempdir().unwrap();
+        let sandbox = Arc::new(MockSandbox::linux());
+        let services = test_services(
+            RunStoreHandle::local(seeded_run_store().await),
+            Arc::new(Emitter::new(test_run_id())),
+            sandbox.clone(),
+            Arc::new(RunMetadataRuntime::new()),
+            None,
+        );
+        let retroed = Retroed {
+            graph: Graph::new("test"),
+            outcome: Ok(Outcome::success()),
+            run_options: test_run_options(repo_dir.path()),
+            duration_ms: 5,
+            services,
+            retro: None,
+        };
+
+        finalize(retroed, &FinalizeOptions {
+            run_dir:          repo_dir.path().to_path_buf(),
+            run_id:           test_run_id(),
+            workflow_name:    "test".to_string(),
+            preserve_sandbox: false,
+            stop_on_terminal: true,
+            last_git_sha:     None,
+        })
+        .await
+        .unwrap();
+
+        assert_eq!(sandbox.stop_count(), 1);
+        assert_eq!(sandbox.delete_count(), 0);
+    }
+
+    #[tokio::test]
+    async fn finalize_leaves_sandbox_running_when_stop_on_terminal_is_false() {
+        let repo_dir = tempfile::tempdir().unwrap();
+        let sandbox = Arc::new(MockSandbox::linux());
+        let services = test_services(
+            RunStoreHandle::local(seeded_run_store().await),
+            Arc::new(Emitter::new(test_run_id())),
+            sandbox.clone(),
+            Arc::new(RunMetadataRuntime::new()),
+            None,
+        );
+        let retroed = Retroed {
+            graph: Graph::new("test"),
+            outcome: Ok(Outcome::success()),
+            run_options: test_run_options(repo_dir.path()),
+            duration_ms: 5,
+            services,
+            retro: None,
+        };
+
+        finalize(retroed, &FinalizeOptions {
+            run_dir:          repo_dir.path().to_path_buf(),
+            run_id:           test_run_id(),
+            workflow_name:    "test".to_string(),
+            preserve_sandbox: false,
+            stop_on_terminal: false,
+            last_git_sha:     None,
+        })
+        .await
+        .unwrap();
+
+        assert_eq!(sandbox.stop_count(), 0);
+        assert_eq!(sandbox.delete_count(), 0);
     }
 
     #[tokio::test]
@@ -1261,6 +1334,7 @@ mod tests {
             run_id:           test_run_id(),
             workflow_name:    "test".to_string(),
             preserve_sandbox: true,
+            stop_on_terminal: true,
             last_git_sha:     Some(head),
         })
         .await

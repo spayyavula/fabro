@@ -922,11 +922,17 @@ paths:
       operationId: deleteRun
       tags: [Runs]
       summary: Delete Run
-      description: Deletes durable store state for a run. This does not remove any local run directory. Active runs require `force=true`.
+      description: Deletes durable store state, local run scratch data, and the run-owned sandbox unless sandbox preservation is enabled. Active runs require `force=true`.
       parameters:
         - $ref: "#/components/parameters/RunId"
         - $ref: "#/components/parameters/ForceRunDelete"
       responses:
+        "200":
+          description: Run deleted and sandbox preservation details returned
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/DeleteRunResponse"
         "204":
           description: Run deleted or already absent
         "404":
@@ -5105,6 +5111,27 @@ components:
             `server.web.url` is non-empty; absent otherwise.
           example: "http://localhost:3000/runs/01JNQVR7M0EJ5GKAT2SC4ERS1Z"
 
+    DeleteRunResponse:
+      description: Returned when a run is deleted but its sandbox is intentionally preserved.
+      type: object
+      required: [deleted, sandbox_preserved, sandbox]
+      properties:
+        deleted:
+          type: boolean
+        sandbox_preserved:
+          type: boolean
+        sandbox:
+          $ref: "#/components/schemas/DeleteRunSandbox"
+
+    DeleteRunSandbox:
+      type: object
+      required: [provider, identifier]
+      properties:
+        provider:
+          type: string
+        identifier:
+          type: string
+
     ApiQuestionOption:
       description: A selectable option for a multiple-choice or multi-select question.
       type: object
@@ -8083,11 +8110,13 @@ components:
 
     RunSandboxSettings:
       type: object
-      required: [provider, preserve, devcontainer, env, local, docker, daytona]
+      required: [provider, preserve, stop_on_terminal, devcontainer, env, local, docker, daytona]
       properties:
         provider:
           type: string
         preserve:
+          type: boolean
+        stop_on_terminal:
           type: boolean
         devcontainer:
           type: boolean

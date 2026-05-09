@@ -66,6 +66,7 @@ function sampleSettings({
       sandbox: {
         provider: "daytona",
         preserve: false,
+        stop_on_terminal: true,
         devcontainer: true,
         env: {},
         local: { worktree_mode: "dirty" },
