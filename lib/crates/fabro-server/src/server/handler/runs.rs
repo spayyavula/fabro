@@ -30,7 +30,7 @@ use tracing::info;
 use super::super::{
     AppState, ListResponse, MAX_PAGE_OFFSET, PaginationParams, RunExecutionMode,
     answer_from_request, api_question_from_pending_interview, default_page_limit,
-    delete_run_internal, load_pending_interview, load_run_title, managed_run, parse_run_id_path,
+    delete_run_internal, load_pending_interview, managed_run, parse_run_id_path,
     reject_if_archived, resolve_interp_string, submit_pending_interview_answer, workflow_event,
 };
 use crate::error::ApiError;
@@ -520,9 +520,13 @@ async fn create_run(
         }
     };
     let created_at = created.run_id.created_at();
-    let title = match load_run_title(state.as_ref(), &created.run_id).await {
-        Ok(title) => title,
-        Err(err) => return err.into_response(),
+    let title = match state.store.get_cached_run(&created.run_id).await {
+        Ok(Some(cached)) => cached.projection.title().into_owned(),
+        Ok(None) => return ApiError::not_found("Run not found.").into_response(),
+        Err(err) => {
+            return ApiError::new(StatusCode::INTERNAL_SERVER_ERROR, err.to_string())
+                .into_response();
+        }
     };
 
     {

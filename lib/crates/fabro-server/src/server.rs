@@ -3455,17 +3455,6 @@ async fn reject_if_archived(state: &AppState, run_id: &RunId) -> Option<Response
     })
 }
 
-async fn load_run_title(state: &AppState, run_id: &RunId) -> Result<String, ApiError> {
-    match state.store.get_cached_summary(run_id).await {
-        Ok(Some(summary)) => Ok(summary.title),
-        Ok(None) => Err(ApiError::not_found("Run not found.")),
-        Err(err) => Err(ApiError::new(
-            StatusCode::INTERNAL_SERVER_ERROR,
-            err.to_string(),
-        )),
-    }
-}
-
 #[cfg(test)]
 #[expect(
     clippy::disallowed_methods,

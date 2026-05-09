@@ -1,3 +1,4 @@
+use std::borrow::Cow;
 use std::collections::{BTreeMap, HashMap};
 use std::num::NonZeroU32;
 
@@ -153,6 +154,17 @@ impl StageProjection {
 }
 
 impl RunProjection {
+    #[must_use]
+    pub fn title(&self) -> Cow<'_, str> {
+        if !self.title.trim().is_empty() {
+            return Cow::Borrowed(&self.title);
+        }
+
+        Cow::Owned(crate::infer_run_title(
+            self.spec.as_ref().map_or("", |spec| spec.graph.goal()),
+        ))
+    }
+
     pub fn stage(&self, stage: &StageId) -> Option<&StageProjection> {
         self.stages.get(stage)
     }
@@ -262,6 +274,71 @@ impl RunProjection {
                 Ok(())
             }
         }
+    }
+}
+
+#[cfg(test)]
+mod title_tests {
+    use std::collections::HashMap;
+
+    use crate::{AttrValue, Graph, RunId, RunProjection, RunSpec, WorkflowSettings};
+
+    fn projection_with_goal(goal: Option<&str>) -> RunProjection {
+        let mut graph = Graph::new("test");
+        if let Some(goal) = goal {
+            graph
+                .attrs
+                .insert("goal".to_string(), AttrValue::String(goal.to_string()));
+        }
+
+        RunProjection {
+            spec: Some(RunSpec {
+                run_id: RunId::new(),
+                settings: WorkflowSettings::default(),
+                graph,
+                workflow_slug: None,
+                source_directory: None,
+                labels: HashMap::new(),
+                provenance: None,
+                manifest_blob: None,
+                definition_blob: None,
+                git: None,
+                fork_source_ref: None,
+                in_place: false,
+            }),
+            ..RunProjection::default()
+        }
+    }
+
+    #[test]
+    fn run_title_returns_stored_title_when_present() {
+        let projection = RunProjection {
+            title: "Stored title".to_string(),
+            ..RunProjection::default()
+        };
+
+        assert_eq!(projection.title(), "Stored title");
+    }
+
+    #[test]
+    fn run_title_infers_from_goal_when_stored_title_is_empty() {
+        let projection = projection_with_goal(Some("## Plan: Legacy title\n\nDetails"));
+
+        assert_eq!(projection.title(), "Legacy title");
+    }
+
+    #[test]
+    fn run_title_falls_back_when_stored_title_and_goal_are_blank() {
+        let projection = projection_with_goal(Some(" \nmore detail"));
+
+        assert_eq!(projection.title(), "Untitled run");
+    }
+
+    #[test]
+    fn run_title_falls_back_when_spec_is_unavailable() {
+        let projection = RunProjection::default();
+
+        assert_eq!(projection.title(), "Untitled run");
     }
 }
 

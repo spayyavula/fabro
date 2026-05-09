@@ -5,9 +5,9 @@ use super::super::{
     Principal, RequiredUser, Response, RewindRequest, RewindResponse, Router, RunAnswerTransport,
     RunControlAction, RunExecutionMode, RunId, RunStatus, RunStatusResponse, StartRunRequest,
     State, StatusCode, Storage, TimelineEntryResponse, WORKER_CANCEL_GRACE, WorkflowError,
-    append_control_request, get, load_pending_control, load_run_title, managed_run, operations,
-    parse_run_id_path, persist_cancelled_run_status, post, reject_if_archived, sleep,
-    update_live_run_from_event, workflow_event,
+    append_control_request, get, load_pending_control, managed_run, operations, parse_run_id_path,
+    persist_cancelled_run_status, post, reject_if_archived, sleep, update_live_run_from_event,
+    workflow_event,
 };
 
 pub(super) fn routes() -> Router<Arc<AppState>> {
@@ -101,6 +101,7 @@ async fn start_run(
         )
         .into_response();
     }
+    let title = run_state.title().into_owned();
     let run_dir = Storage::new(state.server_storage_dir())
         .run_scratch(&id)
         .root()
@@ -130,10 +131,6 @@ async fn start_run(
         );
     }
 
-    let title = match load_run_title(state.as_ref(), &id).await {
-        Ok(title) => title,
-        Err(err) => return err.into_response(),
-    };
     let web_url = state.run_web_url(&id);
     state.scheduler_notify.notify_one();
     (
@@ -287,9 +284,13 @@ async fn cancel_run(
                 .into_response();
         }
     };
-    let title = match load_run_title(state.as_ref(), &id).await {
-        Ok(title) => title,
-        Err(err) => return err.into_response(),
+    let title = match state.store.get_cached_run(&id).await {
+        Ok(Some(cached)) => cached.projection.title().into_owned(),
+        Ok(None) => return ApiError::not_found("Run not found.").into_response(),
+        Err(err) => {
+            return ApiError::new(StatusCode::INTERNAL_SERVER_ERROR, err.to_string())
+                .into_response();
+        }
     };
     let web_url = state.run_web_url(&id);
 
@@ -416,9 +417,13 @@ async fn pause_run(
                 .into_response();
         }
     };
-    let title = match load_run_title(state.as_ref(), &id).await {
-        Ok(title) => title,
-        Err(err) => return err.into_response(),
+    let title = match state.store.get_cached_run(&id).await {
+        Ok(Some(cached)) => cached.projection.title().into_owned(),
+        Ok(None) => return ApiError::not_found("Run not found.").into_response(),
+        Err(err) => {
+            return ApiError::new(StatusCode::INTERNAL_SERVER_ERROR, err.to_string())
+                .into_response();
+        }
     };
     let web_url = state.run_web_url(&id);
 
@@ -528,9 +533,13 @@ async fn unpause_run(
                 .into_response();
         }
     };
-    let title = match load_run_title(state.as_ref(), &id).await {
-        Ok(title) => title,
-        Err(err) => return err.into_response(),
+    let title = match state.store.get_cached_run(&id).await {
+        Ok(Some(cached)) => cached.projection.title().into_owned(),
+        Ok(None) => return ApiError::not_found("Run not found.").into_response(),
+        Err(err) => {
+            return ApiError::new(StatusCode::INTERNAL_SERVER_ERROR, err.to_string())
+                .into_response();
+        }
     };
     let web_url = state.run_web_url(&id);
 
@@ -780,14 +789,7 @@ async fn archive_status_response(state: &AppState, id: RunId) -> Response {
         )
         .into_response();
     };
-    let title = if projection.title.is_empty() {
-        projection.spec.as_ref().map_or_else(
-            || fabro_types::infer_run_title(""),
-            |spec| fabro_types::infer_run_title(spec.graph.goal()),
-        )
-    } else {
-        projection.title
-    };
+    let title = projection.title().into_owned();
     let web_url = state.run_web_url(&id);
     (
         StatusCode::OK,

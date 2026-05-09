@@ -520,11 +520,6 @@ pub(crate) fn build_summary(state: &RunProjection, run_id: &RunId) -> RunSummary
         .as_ref()
         .map(|spec| spec.graph.goal().to_string())
         .unwrap_or_default();
-    let title = if state.title.is_empty() {
-        fabro_types::infer_run_title(&goal)
-    } else {
-        state.title.clone()
-    };
     RunSummary::new(
         *run_id,
         workflow_name,
@@ -533,7 +528,7 @@ pub(crate) fn build_summary(state: &RunProjection, run_id: &RunId) -> RunSummary
             .as_ref()
             .and_then(|spec| spec.workflow_slug.clone()),
         goal,
-        title,
+        state.title().into_owned(),
         state
             .spec
             .as_ref()
