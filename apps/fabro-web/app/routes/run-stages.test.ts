@@ -2,6 +2,7 @@ import { describe, expect, test } from "bun:test";
 import type { EventEnvelope } from "@qltysh/fabro-api-client";
 
 import {
+  buildThreadDnaItems,
   eventsTabLabel,
   eventsToActivity,
   extractStageModel,
@@ -619,5 +620,186 @@ describe("eventsTabLabel", () => {
     expect(eventsTabLabel("primary", "manager_loop")).toBe("Iterations");
     expect(eventsTabLabel("primary", "wait")).toBe("Status");
     expect(eventsTabLabel("primary", "summary")).toBe("Summary");
+  });
+});
+
+describe("buildThreadDnaItems", () => {
+  const RUN_START = "2026-04-09T12:00:00Z";
+
+  function singleSystem(turnIndex: number, ts: string, content = "prompt") {
+    return {
+      kind: "single" as const,
+      turnIndex,
+      turn: { kind: "system" as const, ts, content },
+    };
+  }
+
+  function singleAssistant(turnIndex: number, ts: string) {
+    return {
+      kind: "single" as const,
+      turnIndex,
+      turn: {
+        kind: "assistant" as const,
+        ts,
+        content: "hi",
+        inputTokens: 0,
+        outputTokens: 0,
+      },
+    };
+  }
+
+  function singleTool(
+    turnIndex: number,
+    ts: string,
+    toolName: string,
+    durationMs: number,
+  ) {
+    return {
+      kind: "single" as const,
+      turnIndex,
+      turn: {
+        kind: "tool" as const,
+        ts,
+        toolName,
+        input: "",
+        result: "",
+        isError: false,
+        durationMs,
+      },
+    };
+  }
+
+  function singleSteer(turnIndex: number, ts: string) {
+    return {
+      kind: "single" as const,
+      turnIndex,
+      turn: { kind: "steer" as const, ts, content: "do this" },
+    };
+  }
+
+  test("empty input returns empty output", () => {
+    expect(buildThreadDnaItems([], RUN_START)).toEqual([]);
+  });
+
+  test("system prompt at runStart is an instant marker at startMs=0", () => {
+    const items = buildThreadDnaItems([singleSystem(0, RUN_START)], RUN_START);
+    expect(items).toEqual([
+      {
+        category: "system",
+        label: "stage.prompt",
+        startMs: 0,
+        durationMs: 0,
+        selection: { kind: "single", turnIndex: 0 },
+      },
+    ]);
+  });
+
+  test("assistant turn duration is gap from previous activity end to its ts", () => {
+    // system at 0s, assistant at 8s → bar starts at 0, lasts 8s.
+    const items = buildThreadDnaItems(
+      [
+        singleSystem(0, "2026-04-09T12:00:00Z"),
+        singleAssistant(1, "2026-04-09T12:00:08Z"),
+      ],
+      RUN_START,
+    );
+    expect(items[1]).toEqual({
+      category: "agent",
+      label: "agent.message",
+      startMs: 0,
+      durationMs: 8000,
+      selection: { kind: "single", turnIndex: 1 },
+    });
+  });
+
+  test("tool uses explicit durationMs and advances prevEnd by that duration", () => {
+    // assistant at 8s, tool starting at 8.5s for 30s → next assistant at 39s
+    // should be a 500ms agent bar starting at 38500ms.
+    const items = buildThreadDnaItems(
+      [
+        singleAssistant(0, "2026-04-09T12:00:08Z"),
+        singleTool(1, "2026-04-09T12:00:08.500Z", "shell", 30_000),
+        singleAssistant(2, "2026-04-09T12:00:39Z"),
+      ],
+      RUN_START,
+    );
+    expect(items[1]).toMatchObject({
+      category: "tool",
+      startMs: 8500,
+      durationMs: 30_000,
+    });
+    expect(items[2]).toMatchObject({
+      category: "agent",
+      startMs: 38_500,
+      durationMs: 500,
+    });
+  });
+
+  test("user steer is an instant marker categorised as user", () => {
+    const items = buildThreadDnaItems(
+      [singleSteer(0, "2026-04-09T12:00:30Z")],
+      RUN_START,
+    );
+    expect(items[0]).toEqual({
+      category: "user",
+      label: "user.steer",
+      startMs: 30_000,
+      durationMs: 0,
+      selection: { kind: "single", turnIndex: 0 },
+    });
+  });
+
+  test("tool group spans first child's start to last child's end", () => {
+    const child1 = {
+      turnIndex: 0,
+      turn: {
+        kind: "tool" as const,
+        ts: "2026-04-09T12:00:10Z",
+        toolName: "shell",
+        input: "",
+        result: "",
+        isError: false,
+        durationMs: 1000,
+      },
+    };
+    const child2 = {
+      turnIndex: 1,
+      turn: {
+        kind: "tool" as const,
+        ts: "2026-04-09T12:00:12Z",
+        toolName: "shell",
+        input: "",
+        result: "",
+        isError: false,
+        durationMs: 2000,
+      },
+    };
+    const group = {
+      kind: "group" as const,
+      toolName: "shell",
+      ts: "2026-04-09T12:00:10Z",
+      durationMs: 3000,
+      children: [child1, child2],
+    };
+    const items = buildThreadDnaItems([group], RUN_START);
+    // span = 12s + 2s − 10s = 4s, not the summed 3s.
+    expect(items[0]).toMatchObject({
+      category: "tool",
+      startMs: 10_000,
+      durationMs: 4000,
+      selection: { kind: "group", childTurnIndices: [0, 1] },
+    });
+  });
+
+  test("falls back to first item's ts when runStart is missing", () => {
+    const items = buildThreadDnaItems(
+      [
+        singleSystem(0, "2026-04-09T12:00:05Z"),
+        singleAssistant(1, "2026-04-09T12:00:10Z"),
+      ],
+      undefined,
+    );
+    expect(items[0]).toMatchObject({ startMs: 0 });
+    expect(items[1]).toMatchObject({ startMs: 0, durationMs: 5000 });
   });
 });

@@ -14,11 +14,16 @@ import {
   DetailsPanel,
   EventSearchInput,
   MultiSelectFilter,
+  ThreadDnaStrip,
   debugCategory,
   debugCategoryLabel,
   formatElapsed,
 } from "../components/event-debug";
-import type { DebugCategory } from "../components/event-debug";
+import type {
+  DebugCategory,
+  ThreadDnaItem,
+  ThreadDnaSelection,
+} from "../components/event-debug";
 import { StageSidebar } from "../components/stage-sidebar";
 import type { Stage } from "../components/stage-sidebar";
 import { EmptyState } from "../components/state";
@@ -81,9 +86,7 @@ export type StageRenderer =
   | "wait"
   | "summary";
 
-type PanelSelection =
-  | { kind: "single"; turnIndex: number }
-  | { kind: "group"; childTurnIndices: number[] };
+type PanelSelection = ThreadDnaSelection;
 
 const STAGE_ACTIVITY_EVENT_SET = new Set<string>(STAGE_ACTIVITY_EVENT_TYPES);
 
@@ -340,6 +343,147 @@ export function groupConsecutiveTools(
     }
   }
   flush();
+  return out;
+}
+
+// Convert the event list / grouped tool view into bars for the Thread DNA
+// strip. Each bar carries the same selection identifier the event list uses,
+// so clicking a bar opens the same side-panel entry as clicking its row.
+//
+// Duration semantics:
+//   - tool / command turns use their explicit durationMs
+//   - tool groups span from the first child's start to the last child's end
+//   - assistant turns have no native duration; we treat the time from the
+//     previous activity's end to this message's ts as "thinking" time
+//   - system / steer / interrupt are instants (durationMs = 0)
+export function buildThreadDnaItems(
+  items: DisplayItem[],
+  runStart: string | undefined,
+): ThreadDnaItem[] {
+  if (items.length === 0) return [];
+
+  const anchorMs = (() => {
+    if (runStart) {
+      const parsed = Date.parse(runStart);
+      if (!Number.isNaN(parsed)) return parsed;
+    }
+    const firstTs =
+      items[0].kind === "single" ? items[0].turn.ts : items[0].ts;
+    const parsedFirst = Date.parse(firstTs);
+    return Number.isNaN(parsedFirst) ? null : parsedFirst;
+  })();
+  if (anchorMs == null) return [];
+
+  const out: ThreadDnaItem[] = [];
+  let prevEndMs: number | null = null;
+
+  for (const item of items) {
+    if (item.kind === "single") {
+      const turn = item.turn;
+      const tsMs = Date.parse(turn.ts);
+      if (Number.isNaN(tsMs)) continue;
+      const selection: ThreadDnaSelection = {
+        kind: "single",
+        turnIndex: item.turnIndex,
+      };
+
+      switch (turn.kind) {
+        case "system":
+          out.push({
+            category: "system",
+            label: "stage.prompt",
+            startMs: Math.max(0, tsMs - anchorMs),
+            durationMs: 0,
+            selection,
+          });
+          prevEndMs = tsMs;
+          break;
+        case "steer":
+          out.push({
+            category: "user",
+            label: "user.steer",
+            startMs: Math.max(0, tsMs - anchorMs),
+            durationMs: 0,
+            selection,
+          });
+          prevEndMs = tsMs;
+          break;
+        case "interrupt":
+          out.push({
+            category: "interrupt",
+            label: "interrupt",
+            startMs: Math.max(0, tsMs - anchorMs),
+            durationMs: 0,
+            selection,
+          });
+          prevEndMs = tsMs;
+          break;
+        case "assistant": {
+          // turn.ts is the moment the assistant message arrived (end of
+          // generation). Its bar represents the gap from the last activity
+          // to that moment, so the visual width approximates "thinking".
+          const startSourceMs = prevEndMs ?? tsMs;
+          const startMs = Math.max(0, startSourceMs - anchorMs);
+          const durationMs = Math.max(0, tsMs - startSourceMs);
+          out.push({
+            category: "agent",
+            label: "agent.message",
+            startMs,
+            durationMs,
+            selection,
+          });
+          prevEndMs = tsMs;
+          break;
+        }
+        case "tool": {
+          const startMs = Math.max(0, tsMs - anchorMs);
+          const durationMs = Math.max(0, turn.durationMs);
+          out.push({
+            category: "tool",
+            label: humanizeToolName(turn.toolName),
+            startMs,
+            durationMs,
+            selection,
+          });
+          prevEndMs = tsMs + durationMs;
+          break;
+        }
+        case "command": {
+          const startMs = Math.max(0, tsMs - anchorMs);
+          const durationMs = Math.max(0, turn.durationMs);
+          out.push({
+            category: "tool",
+            label: "command",
+            startMs,
+            durationMs,
+            selection,
+          });
+          prevEndMs = tsMs + durationMs;
+          break;
+        }
+      }
+    } else {
+      const firstStart = Date.parse(item.ts);
+      const lastChild = item.children[item.children.length - 1].turn;
+      const lastEnd = Date.parse(lastChild.ts) + lastChild.durationMs;
+      if (Number.isNaN(firstStart) || Number.isNaN(lastEnd)) continue;
+
+      const startMs = Math.max(0, firstStart - anchorMs);
+      const durationMs = Math.max(0, lastEnd - firstStart);
+      out.push({
+        category: "tool",
+        label: `${humanizeToolName(item.toolName)} ×${item.children.length}`,
+        startMs,
+        durationMs,
+        selection: {
+          kind: "group",
+          childTurnIndices: item.children.map((c) => c.turnIndex),
+        },
+      });
+      prevEndMs = lastEnd;
+    }
+  }
+
   return out;
 }
 
@@ -1127,6 +1271,10 @@ export default function RunStages() {
 
   const selectedStage = stages.find((s: Stage) => s.id === stageId) ?? stages[0];
   const selectedStageId = selectedStage?.id;
+  const runStart =
+    selectedStage?.startedAt ??
+    runQuery.data?.start_time ??
+    runQuery.data?.created_at;
   const stageEventsQuery = useRunStageEvents(id, selectedStageId);
   const turns = useMemo(
     () =>
@@ -1179,6 +1327,10 @@ export default function RunStages() {
   const displayItems = useMemo(
     () => groupConsecutiveTools(filteredTurns),
     [filteredTurns],
+  );
+  const threadDnaItems = useMemo(
+    () => buildThreadDnaItems(displayItems, runStart),
+    [displayItems, runStart],
   );
 
   const openTurn =
@@ -1249,11 +1401,6 @@ export default function RunStages() {
     );
   }
 
-  const runStart =
-    selectedStage.startedAt ??
-    runQuery.data?.start_time ??
-    runQuery.data?.created_at;
-
   return (
     <div className="-mr-4 -mt-6 flex min-h-0 flex-1 sm:-mr-6 lg:-mr-8">
       <div className="shrink-0 pb-6 pr-3 pt-6">
@@ -1293,6 +1440,15 @@ export default function RunStages() {
                   selectedSeq={openDebugSeq}
                   onSelect={setOpenDebugSeq}
                   runStart={runStart}
+                />
+              </div>
+            )}
+            {effectiveTab === "primary" && renderer === "agent" && (
+              <div className="pb-3">
+                <ThreadDnaStrip
+                  items={threadDnaItems}
+                  selection={panelSelection}
+                  onSelect={setPanelSelection}
                 />
               </div>
             )}

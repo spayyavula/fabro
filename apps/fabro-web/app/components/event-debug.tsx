@@ -487,3 +487,203 @@ function DnaPopover({
     document.body,
   );
 }
+
+export type ThreadCategory = "system" | "agent" | "tool" | "user" | "interrupt";
+
+const THREAD_CATEGORY_LABEL: Record<ThreadCategory, string> = {
+  system: "System",
+  agent: "Agent",
+  tool: "Tool",
+  user: "User",
+  interrupt: "Interrupt",
+};
+
+const THREAD_CATEGORY_COLOR: Record<ThreadCategory, string> = {
+  system: "var(--color-amber)",
+  agent: "var(--color-teal-500)",
+  tool: "var(--color-mint)",
+  user: "var(--color-ice-300)",
+  interrupt: "var(--color-coral)",
+};
+
+export type ThreadDnaSelection =
+  | { kind: "single"; turnIndex: number }
+  | { kind: "group"; childTurnIndices: number[] };
+
+export interface ThreadDnaItem {
+  category: ThreadCategory;
+  label: string;
+  startMs: number;
+  durationMs: number;
+  selection: ThreadDnaSelection;
+}
+
+const INSTANT_MARKER_PX = 4;
+const MIN_DURATION_PX = 3;
+
+function selectionKey(s: ThreadDnaSelection): string {
+  return s.kind === "single"
+    ? `s:${s.turnIndex}`
+    : `g:${s.childTurnIndices.join(",")}`;
+}
+
+function selectionsEqual(
+  a: ThreadDnaSelection,
+  b: ThreadDnaSelection | null,
+): boolean {
+  if (b == null) return false;
+  if (a.kind === "single" && b.kind === "single") {
+    return a.turnIndex === b.turnIndex;
+  }
+  if (a.kind === "group" && b.kind === "group") {
+    if (a.childTurnIndices.length !== b.childTurnIndices.length) return false;
+    return a.childTurnIndices.every((v, i) => v === b.childTurnIndices[i]);
+  }
+  return false;
+}
+
+function formatThreadElapsed(ms: number): string {
+  const total = Math.max(0, Math.floor(ms / 1000));
+  const hours = Math.floor(total / 3600);
+  const minutes = Math.floor((total % 3600) / 60);
+  const seconds = total % 60;
+  return `${hours}:${minutes.toString().padStart(2, "0")}:${seconds.toString().padStart(2, "0")}`;
+}
+
+function formatThreadDuration(ms: number): string {
+  if (ms < 1000) return `${Math.max(0, Math.round(ms))} ms`;
+  if (ms < 60000) return `${(ms / 1000).toFixed(1)} s`;
+  const minutes = Math.floor(ms / 60000);
+  const seconds = Math.round((ms % 60000) / 1000);
+  return `${minutes}:${seconds.toString().padStart(2, "0")}`;
+}
+
+export function ThreadDnaStrip({
+  items,
+  selection,
+  onSelect,
+}: {
+  items: ThreadDnaItem[];
+  selection: ThreadDnaSelection | null;
+  onSelect: (s: ThreadDnaSelection) => void;
+}) {
+  const [hover, setHover] = useState<{ key: string; rect: DOMRect } | null>(
+    null,
+  );
+
+  const totalMs = useMemo(() => {
+    let max = 0;
+    for (const item of items) {
+      const end = item.startMs + Math.max(0, item.durationMs);
+      if (end > max) max = end;
+    }
+    return Math.max(1, max);
+  }, [items]);
+
+  if (items.length === 0) {
+    return (
+      <div
+        className="rounded-md bg-overlay"
+        style={{ height: STRIP_HEIGHT }}
+        aria-hidden="true"
+      />
+    );
+  }
+
+  const hoveredItem =
+    hover != null
+      ? items.find((it) => selectionKey(it.selection) === hover.key) ?? null
+      : null;
+
+  return (
+    <div
+      className="relative rounded-md bg-overlay px-1.5 py-[5px]"
+      style={{ height: STRIP_HEIGHT }}
+    >
+      <div className="relative h-full">
+        {items.map((item) => {
+          const key = selectionKey(item.selection);
+          const isInstant = item.durationMs <= 0;
+          const isSelected = selectionsEqual(item.selection, selection);
+          const isHovered = hover?.key === key;
+          const leftPct = (item.startMs / totalMs) * 100;
+          const baseColor = THREAD_CATEGORY_COLOR[item.category];
+
+          const style: React.CSSProperties = isInstant
+            ? {
+                left: `calc(${leftPct}% - ${INSTANT_MARKER_PX / 2}px)`,
+                width: INSTANT_MARKER_PX,
+                top: 0,
+                bottom: 0,
+                background: baseColor,
+                opacity: 1,
+                boxShadow: isSelected
+                  ? "0 0 0 1px rgba(255,255,255,0.55)"
+                  : "none",
+              }
+            : {
+                left: `${leftPct}%`,
+                width: `max(${MIN_DURATION_PX}px, ${(item.durationMs / totalMs) * 100}%)`,
+                top: 0,
+                bottom: 0,
+                background: baseColor,
+                opacity: isSelected || isHovered ? 1 : 0.9,
+                boxShadow: isSelected
+                  ? "0 0 0 1px rgba(255,255,255,0.55)"
+                  : "none",
+              };
+
+          return (
+            <div
+              key={key}
+              role="button"
+              tabIndex={-1}
+              aria-label={`${THREAD_CATEGORY_LABEL[item.category]} · ${item.label}`}
+              aria-pressed={isSelected}
+              onMouseEnter={(e) =>
+                setHover({
+                  key,
+                  rect: e.currentTarget.getBoundingClientRect(),
+                })
+              }
+              onMouseLeave={() =>
+                setHover((cur) => (cur?.key === key ? null : cur))
+              }
+              onClick={() => onSelect(item.selection)}
+              className="absolute cursor-pointer rounded-[2px] transition-all duration-100 ease-out"
+              style={style}
+            />
+          );
+        })}
+      </div>
+      {hoveredItem != null && hover != null && (
+        <ThreadDnaPopover item={hoveredItem} anchorRect={hover.rect} />
+      )}
+    </div>
+  );
+}
+
+function ThreadDnaPopover({
+  item,
+  anchorRect,
+}: {
+  item: ThreadDnaItem;
+  anchorRect: DOMRect;
+}) {
+  if (typeof document === "undefined") return null;
+  const left = anchorRect.left + anchorRect.width / 2;
+  const top = anchorRect.top;
+  const elapsed = formatThreadElapsed(item.startMs);
+  const duration =
+    item.durationMs > 0 ? formatThreadDuration(item.durationMs) : "instant";
+  return createPortal(
+    <div
+      role="tooltip"
+      style={{ left, top }}
+      className="pointer-events-none fixed z-50 -translate-x-1/2 -translate-y-[calc(100%+8px)] whitespace-nowrap rounded-md bg-panel-alt px-2.5 py-1 text-xs text-fg shadow-lg outline-1 -outline-offset-1 outline-line-strong"
+    >
+      {`${THREAD_CATEGORY_LABEL[item.category]} · ${item.label} · ${elapsed} · ${duration}`}
+    </div>,
+    document.body,
+  );
+}
