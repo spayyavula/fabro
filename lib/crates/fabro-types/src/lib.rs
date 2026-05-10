@@ -81,7 +81,10 @@ pub use run_summary::RunSummary;
 pub use run_title::{RunTitleError, infer_run_title, normalize_explicit_run_title};
 pub use sandbox_details::{SandboxDetails, SandboxResources, SandboxState, SandboxTimestamps};
 pub use sandbox_record::SandboxRecord;
-pub use sandbox_services::{SandboxService, SandboxServiceListResponse};
+pub use sandbox_services::{
+    SandboxService, SandboxServiceDiscoverySource, SandboxServiceListMeta,
+    SandboxServiceListResponse,
+};
 pub use secret::{SecretMetadata, SecretType};
 pub use stage_completion::StageCompletion;
 pub use stage_handler::StageHandler;

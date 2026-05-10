@@ -4,7 +4,10 @@ use fabro_api::types::{
     SandboxService as ApiSandboxService,
     SandboxServiceListResponse as ApiSandboxServiceListResponse,
 };
-use fabro_types::{SandboxService, SandboxServiceListResponse};
+use fabro_types::{
+    SandboxService, SandboxServiceDiscoverySource, SandboxServiceListMeta,
+    SandboxServiceListResponse,
+};
 use serde_json::json;
 
 #[test]
@@ -25,6 +28,9 @@ fn sandbox_services_json_matches_openapi_shape() {
             ],
             preview_supported: true,
         }],
+        meta: SandboxServiceListMeta {
+            source: SandboxServiceDiscoverySource::Ss,
+        },
     };
 
     assert_eq!(
@@ -38,17 +44,22 @@ fn sandbox_services_json_matches_openapi_shape() {
                     r#"users:(("vite",pid=84,fd=19))"#,
                 ],
                 "preview_supported": true
-            }]
+            }],
+            "meta": {
+                "source": "ss"
+            }
         })
     );
 }
 
 #[test]
 fn sandbox_services_deserializes_empty_response() {
-    let response: SandboxServiceListResponse = serde_json::from_value(json!({ "data": [] }))
-        .expect("empty service response should deserialize");
+    let response: SandboxServiceListResponse =
+        serde_json::from_value(json!({ "data": [], "meta": { "source": "procfs" } }))
+            .expect("empty service response should deserialize");
 
     assert!(response.data.is_empty());
+    assert_eq!(response.meta.source, SandboxServiceDiscoverySource::Procfs);
 }
 
 fn assert_same_type<T: 'static, U: 'static>() {

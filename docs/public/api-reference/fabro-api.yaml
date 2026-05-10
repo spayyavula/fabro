@@ -8004,13 +8004,13 @@ components:
           example: 3000
         addresses:
           type: array
-          description: Local bind addresses reported by `ss`.
+          description: Local bind addresses discovered from `ss` or `/proc/net/tcp*`.
           items:
             type: string
           example: ["127.0.0.1:3000", "[::]:3000"]
         processes:
           type: array
-          description: Visible process summaries reported by `ss`.
+          description: Visible process summaries when available. Empty when the sandbox only supports `/proc/net/tcp*` discovery.
           items:
             type: string
           example: ['users:(("node",pid=42,fd=23))']
@@ -8024,11 +8024,30 @@ components:
       type: object
       required:
         - data
+        - meta
       properties:
         data:
           type: array
           items:
             $ref: "#/components/schemas/SandboxService"
+        meta:
+          $ref: "#/components/schemas/SandboxServiceListMeta"
+
+    SandboxServiceListMeta:
+      description: Metadata about sandbox service discovery.
+      type: object
+      required:
+        - source
+      properties:
+        source:
+          $ref: "#/components/schemas/SandboxServiceDiscoverySource"
+
+    SandboxServiceDiscoverySource:
+      description: Tool or kernel interface used to discover sandbox services.
+      type: string
+      enum:
+        - ss
+        - procfs
 
     VncPreviewResponse:
       description: Response containing a signed noVNC preview URL for a Daytona sandbox.

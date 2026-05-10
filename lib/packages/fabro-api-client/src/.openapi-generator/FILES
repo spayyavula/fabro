@@ -290,6 +290,8 @@ models/sandbox-details.ts
 models/sandbox-file-entry.ts
 models/sandbox-file-list-response.ts
 models/sandbox-resources.ts
+models/sandbox-service-discovery-source.ts
+models/sandbox-service-list-meta.ts
 models/sandbox-service-list-response.ts
 models/sandbox-service.ts
 models/sandbox-state.ts

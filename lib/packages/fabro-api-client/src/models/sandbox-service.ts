@@ -23,11 +23,11 @@ export interface SandboxService {
      */
     'port': number;
     /**
-     * Local bind addresses reported by `ss`.
+     * Local bind addresses discovered from `ss` or `/proc/net/tcp*`.
      */
     'addresses': Array<string>;
     /**
-     * Visible process summaries reported by `ss`.
+     * Visible process summaries when available. Empty when the sandbox only supports `/proc/net/tcp*` discovery.
      */
     'processes': Array<string>;
     /**

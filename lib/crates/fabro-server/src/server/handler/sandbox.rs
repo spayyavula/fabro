@@ -1,9 +1,11 @@
 use std::collections::BTreeMap;
+use std::net::{Ipv4Addr, Ipv6Addr};
 use std::num::NonZeroU64;
 use std::sync::Arc;
 
 use axum::extract::ws::{Message as WsMessage, WebSocket, WebSocketUpgrade};
 use fabro_sandbox::{TerminalSize, open_terminal_for_run};
+use fabro_types::{SandboxServiceDiscoverySource, SandboxServiceListMeta};
 use futures_util::FutureExt;
 use futures_util::future::BoxFuture;
 
@@ -20,7 +22,19 @@ use super::super::{
 const MAX_TERMINAL_CONTROL_BYTES: usize = 4096;
 const DEFAULT_VNC_NO_VNC_PORT: u16 = 6080;
 const DEFAULT_VNC_TTL_SECS: i32 = 3600;
-const LIST_SANDBOX_SERVICES_COMMAND: &str = "ss -H -ltnp";
+const LIST_SANDBOX_SERVICES_COMMAND: &str = r#"if command -v ss >/dev/null 2>&1; then
+  ss -H -ltnp && exit 0
+fi
+printf 'FABRO_PROC_NET_TCP procfs\n'
+for file in /proc/net/tcp /proc/net/tcp6; do
+  if [ -r "$file" ]; then
+    printf 'FABRO_PROC_NET_TCP %s\n' "$file"
+    while IFS= read -r line; do
+      printf '%s\n' "$line"
+    done < "$file"
+  fi
+done"#;
+const LIST_SANDBOX_SERVICES_FAILURE_LABEL: &str = "sandbox service discovery command";
 const LIST_SANDBOX_SERVICES_TIMEOUT_MS: u64 = 5_000;
 // Daytona's signed preview points at the noVNC service root, which serves a
 // directory listing. Force the iframe to the actual viewer page with
@@ -572,8 +586,12 @@ async fn list_sandbox_services(
         .into_response();
     }
 
+    let discovery = parse_sandbox_services(&result.stdout, &provider);
     Json(SandboxServiceListResponse {
-        data: parse_ss_listening_services(&result.stdout, &provider),
+        data: discovery.services,
+        meta: SandboxServiceListMeta {
+            source: discovery.source,
+        },
     })
     .into_response()
 }
@@ -587,7 +605,29 @@ fn sandbox_service_command_failure_detail(result: &fabro_sandbox::ExecResult) ->
     if !stdout.is_empty() {
         return stdout.to_string();
     }
-    format!("{LIST_SANDBOX_SERVICES_COMMAND} failed")
+    format!("{LIST_SANDBOX_SERVICES_FAILURE_LABEL} failed")
+}
+
+struct SandboxServiceDiscovery {
+    services: Vec<SandboxService>,
+    source:   SandboxServiceDiscoverySource,
+}
+
+fn parse_sandbox_services(output: &str, provider: &str) -> SandboxServiceDiscovery {
+    if output
+        .lines()
+        .any(|line| line.trim_start().starts_with("FABRO_PROC_NET_TCP "))
+    {
+        SandboxServiceDiscovery {
+            services: parse_proc_net_listening_services(output, provider),
+            source:   SandboxServiceDiscoverySource::Procfs,
+        }
+    } else {
+        SandboxServiceDiscovery {
+            services: parse_ss_listening_services(output, provider),
+            source:   SandboxServiceDiscoverySource::Ss,
+        }
+    }
 }
 
 fn parse_ss_listening_services(output: &str, provider: &str) -> Vec<SandboxService> {
@@ -605,23 +645,116 @@ fn parse_ss_listening_services(output: &str, provider: &str) -> Vec<SandboxServi
             continue;
         };
         let process = (fields.len() > 5).then(|| fields[5..].join(" "));
-        let service = services.entry(port).or_insert_with(|| SandboxService {
-            port,
-            addresses: Vec::new(),
-            processes: Vec::new(),
-            preview_supported: preview_supported(provider, port),
-        });
-        push_unique(&mut service.addresses, address.to_string());
-        if let Some(process) = process {
-            push_unique(&mut service.processes, process);
-        }
+        push_service(&mut services, provider, port, address.to_string(), process);
     }
-    services.into_values().collect()
+    sorted_services(services)
 }
 
 fn parse_ss_local_port(address: &str) -> Option<u16> {
     let port = address.rsplit_once(':')?.1.parse::<u16>().ok()?;
     (port > 0).then_some(port)
+}
+
+#[derive(Clone, Copy)]
+enum ProcNetFamily {
+    Ipv4,
+    Ipv6,
+}
+
+fn parse_proc_net_listening_services(output: &str, provider: &str) -> Vec<SandboxService> {
+    let mut services = BTreeMap::<u16, SandboxService>::new();
+    let mut family = None;
+    for line in output
+        .lines()
+        .map(str::trim)
+        .filter(|line| !line.is_empty())
+    {
+        if let Some(path) = line.strip_prefix("FABRO_PROC_NET_TCP ") {
+            family = if path.ends_with("/tcp6") {
+                Some(ProcNetFamily::Ipv6)
+            } else {
+                Some(ProcNetFamily::Ipv4)
+            };
+            continue;
+        }
+        if line.starts_with("sl") {
+            continue;
+        }
+        let Some(family) = family else {
+            continue;
+        };
+        let fields = line.split_whitespace().collect::<Vec<_>>();
+        let (Some(local_address), Some(state)) = (fields.get(1), fields.get(3)) else {
+            continue;
+        };
+        if *state != "0A" {
+            continue;
+        }
+        let Some((address, port)) = parse_proc_net_local_address(local_address, family) else {
+            continue;
+        };
+        push_service(&mut services, provider, port, address, None);
+    }
+    sorted_services(services)
+}
+
+fn sorted_services(services: BTreeMap<u16, SandboxService>) -> Vec<SandboxService> {
+    let mut services = services.into_values().collect::<Vec<_>>();
+    services.sort_by_key(|service| (!service.preview_supported, service.port));
+    services
+}
+
+fn parse_proc_net_local_address(value: &str, family: ProcNetFamily) -> Option<(String, u16)> {
+    let (address_hex, port_hex) = value.split_once(':')?;
+    let port = u16::from_str_radix(port_hex, 16).ok()?;
+    if port == 0 {
+        return None;
+    }
+    let address = match family {
+        ProcNetFamily::Ipv4 => format!("{}:{port}", parse_proc_net_ipv4(address_hex)?),
+        ProcNetFamily::Ipv6 => format!("[{}]:{port}", parse_proc_net_ipv6(address_hex)?),
+    };
+    Some((address, port))
+}
+
+fn parse_proc_net_ipv4(value: &str) -> Option<Ipv4Addr> {
+    if value.len() != 8 {
+        return None;
+    }
+    let raw = u32::from_str_radix(value, 16).ok()?;
+    Some(Ipv4Addr::from(raw.to_le_bytes()))
+}
+
+fn parse_proc_net_ipv6(value: &str) -> Option<Ipv6Addr> {
+    if value.len() != 32 {
+        return None;
+    }
+    let mut bytes = [0_u8; 16];
+    for (chunk_index, chunk) in value.as_bytes().chunks_exact(8).enumerate() {
+        let chunk = std::str::from_utf8(chunk).ok()?;
+        let raw = u32::from_str_radix(chunk, 16).ok()?;
+        bytes[chunk_index * 4..chunk_index * 4 + 4].copy_from_slice(&raw.to_le_bytes());
+    }
+    Some(Ipv6Addr::from(bytes))
+}
+
+fn push_service(
+    services: &mut BTreeMap<u16, SandboxService>,
+    provider: &str,
+    port: u16,
+    address: String,
+    process: Option<String>,
+) {
+    let service = services.entry(port).or_insert_with(|| SandboxService {
+        port,
+        addresses: Vec::new(),
+        processes: Vec::new(),
+        preview_supported: preview_supported(provider, port),
+    });
+    push_unique(&mut service.addresses, address);
+    if let Some(process) = process {
+        push_unique(&mut service.processes, process);
+    }
 }
 
 fn preview_supported(provider: &str, port: u16) -> bool {
@@ -868,24 +1001,24 @@ LISTEN 0 4096 [::1]:2500 [::]:* users:(("debug",pid=168,fd=7))
         );
 
         assert_eq!(services.len(), 4);
-        assert_eq!(services[0].port, 2500);
-        assert_eq!(services[0].addresses, vec!["[::1]:2500"]);
+        assert_eq!(services[0].port, 3000);
+        assert_eq!(services[0].addresses, vec!["127.0.0.1:3000"]);
         assert_eq!(services[0].processes, vec![
-            r#"users:(("debug",pid=168,fd=7))"#
-        ]);
-        assert!(!services[0].preview_supported);
-        assert_eq!(services[1].port, 3000);
-        assert_eq!(services[1].addresses, vec!["127.0.0.1:3000"]);
-        assert_eq!(services[1].processes, vec![
             r#"users:(("node",pid=42,fd=23))"#
         ]);
+        assert!(services[0].preview_supported);
+        assert_eq!(services[1].port, 5173);
+        assert_eq!(services[1].addresses, vec!["0.0.0.0:5173"]);
         assert!(services[1].preview_supported);
-        assert_eq!(services[2].port, 5173);
-        assert_eq!(services[2].addresses, vec!["0.0.0.0:5173"]);
+        assert_eq!(services[2].port, 8080);
+        assert_eq!(services[2].addresses, vec!["[::]:8080"]);
         assert!(services[2].preview_supported);
-        assert_eq!(services[3].port, 8080);
-        assert_eq!(services[3].addresses, vec!["[::]:8080"]);
-        assert!(services[3].preview_supported);
+        assert_eq!(services[3].port, 2500);
+        assert_eq!(services[3].addresses, vec!["[::1]:2500"]);
+        assert_eq!(services[3].processes, vec![
+            r#"users:(("debug",pid=168,fd=7))"#
+        ]);
+        assert!(!services[3].preview_supported);
     }
 
     #[test]
@@ -932,6 +1065,52 @@ LISTEN 0 4096 [::]:3000 [::]:* users:(("vite",pid=84,fd=19))
     }
 
     #[test]
+    fn proc_net_parser_extracts_listening_tcp_services_without_processes() {
+        let discovery = parse_sandbox_services(
+            r#"
+FABRO_PROC_NET_TCP /proc/net/tcp
+  sl  local_address rem_address   st tx_queue rx_queue tr tm->when retrnsmt   uid  timeout inode
+   0: 0100007F:0BB8 00000000:0000 0A 00000000:00000000 00:00000000 00000000   501        0 11111
+   1: 00000000:1435 00000000:0000 0A 00000000:00000000 00:00000000 00000000   501        0 22222
+   2: 0100007F:2328 00000000:0000 01 00000000:00000000 00:00000000 00000000   501        0 33333
+FABRO_PROC_NET_TCP /proc/net/tcp6
+  sl  local_address                         remote_address                        st tx_queue rx_queue tr tm->when retrnsmt   uid  timeout inode
+   0: 00000000000000000000000000000000:1F90 00000000000000000000000000000000:0000 0A 00000000:00000000 00:00000000 00000000   501        0 44444
+   1: 00000000000000000000000001000000:09C4 00000000000000000000000000000000:0000 0A 00000000:00000000 00:00000000 00000000   501        0 55555
+"#,
+            "daytona",
+        );
+
+        assert_eq!(discovery.source, SandboxServiceDiscoverySource::Procfs);
+        assert_eq!(discovery.services, vec![
+            SandboxService {
+                port:              3000,
+                addresses:         vec!["127.0.0.1:3000".to_string()],
+                processes:         vec![],
+                preview_supported: true,
+            },
+            SandboxService {
+                port:              5173,
+                addresses:         vec!["0.0.0.0:5173".to_string()],
+                processes:         vec![],
+                preview_supported: true,
+            },
+            SandboxService {
+                port:              8080,
+                addresses:         vec!["[::]:8080".to_string()],
+                processes:         vec![],
+                preview_supported: true,
+            },
+            SandboxService {
+                port:              2500,
+                addresses:         vec!["[::1]:2500".to_string()],
+                processes:         vec![],
+                preview_supported: false,
+            },
+        ]);
+    }
+
+    #[test]
     fn preview_support_is_daytona_only_for_documented_range() {
         assert!(!preview_supported("daytona", 2500));
         assert!(preview_supported("daytona", 3000));
@@ -963,7 +1142,7 @@ LISTEN 0 4096 [::]:3000 [::]:* users:(("vite",pid=84,fd=19))
         result.stdout.clear();
         assert_eq!(
             sandbox_service_command_failure_detail(&result),
-            "ss -H -ltnp failed"
+            "sandbox service discovery command failed"
         );
     }
 

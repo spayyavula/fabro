@@ -23,6 +23,7 @@ use fabro_api::types::{
     RunFilesMeta, RunFilesMetaScope, RunFilesMetaSource, SandboxService,
     SandboxServiceListResponse,
 };
+use fabro_types::{SandboxServiceDiscoverySource, SandboxServiceListMeta};
 use serde_json::json;
 
 use crate::error::ApiError;
@@ -423,6 +424,9 @@ pub(crate) async fn list_sandbox_services_stub(
                     preview_supported: false,
                 },
             ],
+            meta: SandboxServiceListMeta {
+                source: SandboxServiceDiscoverySource::Ss,
+            },
         }),
     )
         .into_response()

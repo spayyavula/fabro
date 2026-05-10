@@ -25,6 +25,13 @@ function makeIdlePreview(): PreviewMutationShape {
   };
 }
 
+function makeServicesData(data: SandboxService[]) {
+  return {
+    data,
+    meta: { source: "ss" as const },
+  };
+}
+
 const mountedRenderers: TestRenderer.ReactTestRenderer[] = [];
 
 interface WindowLike {
@@ -97,7 +104,7 @@ describe("ServicesPanelView", () => {
 
   test("shows empty state when the services list is empty", () => {
     const renderer = renderView({
-      servicesQuery:   { ...makeIdleQuery(), data: { data: [] } },
+      servicesQuery:   { ...makeIdleQuery(), data: makeServicesData([]) },
       previewMutation: makeIdlePreview(),
     });
     const titles = renderer.root.findAll(
@@ -107,6 +114,46 @@ describe("ServicesPanelView", () => {
         node.children.includes("No services"),
     );
     expect(titles).toHaveLength(1);
+  });
+
+  test("shows an iproute2 tip when services were discovered from procfs", () => {
+    const service: SandboxService = {
+      port:              3000,
+      addresses:         ["0.0.0.0:3000"],
+      processes:         [],
+      preview_supported: true,
+    };
+    const renderer = renderView({
+      servicesQuery: {
+        ...makeIdleQuery(),
+        data: {
+          data: [service],
+          meta: { source: "procfs" },
+        },
+      },
+      previewMutation: makeIdlePreview(),
+    });
+
+    const tipLabels = renderer.root.findAll(
+      (node) =>
+        node.type === "span" &&
+        Array.isArray(node.children) &&
+        node.children.includes("Tip:"),
+    );
+    expect(tipLabels).toHaveLength(1);
+
+    const commands = renderer.root.findAll(
+      (node) =>
+        node.type === "code" &&
+        Array.isArray(node.children) &&
+        node.children.includes("apt-get install iproute2"),
+    );
+    expect(commands).toHaveLength(1);
+
+    const tipText = JSON.stringify(renderer.toJSON());
+    expect(tipText).toContain("Install ");
+    expect(tipText).toContain("ss");
+    expect(tipText).toContain(" in the sandbox for improved services listing:");
   });
 
   test("shows API error state with the error message", () => {
@@ -139,7 +186,7 @@ describe("ServicesPanelView", () => {
       preview_supported: false,
     };
     const renderer = renderView({
-      servicesQuery:   { ...makeIdleQuery(), data: { data: [service] } },
+      servicesQuery:   { ...makeIdleQuery(), data: makeServicesData([service]) },
       previewMutation: makeIdlePreview(),
     });
 
@@ -158,14 +205,6 @@ describe("ServicesPanelView", () => {
         node.children.includes("Preview"),
     );
     expect(previewButtons).toHaveLength(0);
-
-    const unavailable = renderer.root.findAll(
-      (node) =>
-        node.type === "span" &&
-        Array.isArray(node.children) &&
-        node.children.includes("Unavailable"),
-    );
-    expect(unavailable).toHaveLength(1);
   });
 
   test("renders a Preview button for a previewable service and triggers with signed args", async () => {
@@ -186,7 +225,7 @@ describe("ServicesPanelView", () => {
     installWindowOpen(windowOpenSpy);
 
     const renderer = renderView({
-      servicesQuery:   { ...makeIdleQuery(), data: { data: [service] } },
+      servicesQuery:   { ...makeIdleQuery(), data: makeServicesData([service]) },
       previewMutation: { trigger },
     });
     const previewButton = renderer.root.find(
@@ -226,7 +265,7 @@ describe("ServicesPanelView", () => {
     installWindowOpen(windowOpenSpy);
 
     const renderer = renderView({
-      servicesQuery:   { ...makeIdleQuery(), data: { data: [service] } },
+      servicesQuery:   { ...makeIdleQuery(), data: makeServicesData([service]) },
       previewMutation: { trigger },
     });
     const previewButton = renderer.root.find(

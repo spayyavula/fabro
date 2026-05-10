@@ -268,6 +268,8 @@ export * from './sandbox-file-entry';
 export * from './sandbox-file-list-response';
 export * from './sandbox-resources';
 export * from './sandbox-service';
+export * from './sandbox-service-discovery-source';
+export * from './sandbox-service-list-meta';
 export * from './sandbox-service-list-response';
 export * from './sandbox-state';
 export * from './sandbox-timestamps';

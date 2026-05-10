@@ -1,6 +1,9 @@
 import { useState } from "react";
 import { ArrowPathIcon } from "@heroicons/react/20/solid";
-import type { SandboxService } from "@qltysh/fabro-api-client";
+import type {
+  SandboxService,
+  SandboxServiceListResponse,
+} from "@qltysh/fabro-api-client";
 
 import { useSandboxServices } from "../../lib/queries";
 import { usePreviewRun } from "../../lib/mutations";
@@ -10,7 +13,7 @@ import {
   ErrorState,
   LoadingState,
 } from "../../components/state";
-import { SECONDARY_BUTTON_CLASS, Tooltip } from "../../components/ui";
+import { Tooltip } from "../../components/ui";
 
 export interface ServicesPanelProps {
   runId:    string;
@@ -19,6 +22,9 @@ export interface ServicesPanelProps {
 
 const REFRESH_BUTTON_CLASS =
   "inline-flex size-9 items-center justify-center rounded-lg text-fg-2 outline-1 -outline-offset-1 outline-white/10 transition-colors hover:bg-overlay hover:text-fg focus-visible:outline-2 focus-visible:-outline-offset-1 focus-visible:outline-teal-500 disabled:cursor-not-allowed disabled:opacity-50";
+
+const PREVIEW_BUTTON_CLASS =
+  "inline-flex items-center justify-center rounded-md px-3 py-1 text-xs font-medium text-fg-2 outline-1 -outline-offset-1 outline-white/10 transition-colors hover:bg-overlay hover:text-fg focus-visible:outline-2 focus-visible:-outline-offset-1 focus-visible:outline-teal-500 disabled:cursor-not-allowed disabled:opacity-60";
 
 export default function ServicesPanel({ runId, leading }: ServicesPanelProps) {
   const servicesQuery = useSandboxServices(runId);
@@ -34,7 +40,7 @@ export default function ServicesPanel({ runId, leading }: ServicesPanelProps) {
 }
 
 export interface ServicesQueryShape {
-  data?:        { data: SandboxService[] } | undefined;
+  data?:        SandboxServiceListResponse | undefined;
   error?:       unknown;
   isLoading:    boolean;
   isValidating: boolean;
@@ -71,6 +77,7 @@ export function ServicesPanelView({
   const [previewError, setPreviewError] = useState<string | null>(null);
 
   const services = servicesQuery.data?.data ?? [];
+  const discoverySource = servicesQuery.data?.meta.source;
   const queryErrorMessage = describeQueryError(servicesQuery.error);
   const showLoading = servicesQuery.isLoading && !servicesQuery.data;
   const showError = queryErrorMessage !== null && !servicesQuery.data;
@@ -142,11 +149,14 @@ export function ServicesPanelView({
         ) : services.length === 0 ? (
           <EmptyState title="No services" />
         ) : (
-          <ServicesTable
-            services={services}
-            pendingPort={pendingPort}
-            onPreview={handlePreview}
-          />
+          <>
+            {discoverySource === "procfs" ? <ProcfsDiscoveryTip /> : null}
+            <ServicesTable
+              services={services}
+              pendingPort={pendingPort}
+              onPreview={handlePreview}
+            />
+          </>
         )}
       </div>
     </section>
@@ -158,6 +168,17 @@ function describeQueryError(error: unknown): string | null {
   if (error instanceof ApiError) return error.message;
   if (error instanceof Error) return error.message;
   return "Could not load services.";
+}
+
+function ProcfsDiscoveryTip() {
+  return (
+    <div className="mb-3 rounded-md border border-line bg-panel/60 px-3 py-2 text-xs leading-5 text-fg-3">
+      <span className="font-medium text-fg-2">Tip:</span>{" "}
+      Install <code className="font-mono text-fg-2">ss</code> in the sandbox
+      for improved services listing:{" "}
+      <code className="font-mono text-fg-2">apt-get install iproute2</code>
+    </div>
+  );
 }
 
 function ServicesTable({
@@ -174,10 +195,11 @@ function ServicesTable({
       <table className="w-full text-sm">
         <thead className="border-b border-line bg-panel/60">
           <tr>
-            <th className="px-4 py-2 text-left text-xs font-medium text-fg-3">Port</th>
-            <th className="px-4 py-2 text-left text-xs font-medium text-fg-3">Bindings</th>
-            <th className="px-4 py-2 text-left text-xs font-medium text-fg-3">Process</th>
-            <th className="px-4 py-2 text-right text-xs font-medium text-fg-3">Action</th>
+            <th className="px-4 py-3 text-left text-xs font-medium text-fg-3">Port</th>
+            <th className="px-4 py-3 text-left text-xs font-medium text-fg-3">Bindings</th>
+            <th className="px-4 py-3 text-left text-xs font-medium text-fg-3">Process</th>
+            <th className="px-4 py-3 text-right text-xs font-medium text-fg-3" />
+
           </tr>
         </thead>
         <tbody className="divide-y divide-line">
@@ -206,34 +228,32 @@ function ServiceRow({
 }) {
   return (
     <tr>
-      <td className="px-4 py-2 font-mono text-xs text-fg-2">{service.port}</td>
-      <td className="px-4 py-2 font-mono text-xs text-fg-3">
+      <td className="px-4 py-3 font-mono text-xs text-fg-2">{service.port}</td>
+      <td className="px-4 py-3 font-mono text-xs text-fg-3">
         {service.addresses.length > 0 ? (
           service.addresses.join(", ")
         ) : (
           <span className="text-fg-muted">-</span>
         )}
       </td>
-      <td className="px-4 py-2 font-mono text-xs text-fg-3">
+      <td className="px-4 py-3 font-mono text-xs text-fg-3">
         {service.processes.length > 0 ? (
           service.processes.join(", ")
         ) : (
           <span className="text-fg-muted">-</span>
         )}
       </td>
-      <td className="px-4 py-2 text-right">
+      <td className="px-4 py-3 text-right">
         {service.preview_supported ? (
           <button
             type="button"
-            className={SECONDARY_BUTTON_CLASS}
+            className={PREVIEW_BUTTON_CLASS}
             onClick={() => onPreview(service.port)}
             disabled={pending}
           >
             {pending ? "Opening…" : "Preview"}
           </button>
-        ) : (
-          <span className="text-xs text-fg-muted">Unavailable</span>
-        )}
+        ) : null}
       </td>
     </tr>
   );
