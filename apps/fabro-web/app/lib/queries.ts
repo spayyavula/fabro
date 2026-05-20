@@ -18,6 +18,7 @@ import type {
   RunProjection,
   Run,
   SandboxDetails,
+  SecretListResponse,
   SandboxFileListResponse,
   SandboxServiceListResponse,
   ServerSettings,
@@ -42,6 +43,7 @@ import {
   runInternalsApi,
   runOutputsApi,
   runsApi,
+  secretsApi,
   settingsApi,
   systemApi,
   workflowsApi,
@@ -382,5 +384,12 @@ export function useProviders() {
     queryKeys.providers.list(),
     () => apiData(() => modelsApi.listProviders()),
     immutableOptions,
+  );
+}
+
+export function useSecrets() {
+  return useSWR<SecretListResponse>(
+    queryKeys.secrets.list(),
+    () => apiData(() => secretsApi.listSecrets()),
   );
 }

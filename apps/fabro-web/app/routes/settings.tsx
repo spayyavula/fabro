@@ -3,6 +3,7 @@ import {
   CircleStackIcon,
   Cog6ToothIcon,
   CpuChipIcon,
+  KeyIcon,
   PuzzlePieceIcon,
   ServerStackIcon,
   ShieldCheckIcon,
@@ -45,6 +46,12 @@ const navItems: NavEntry[] = [
     href: "/settings/models",
     icon: CpuChipIcon,
     match: (p) => p.startsWith("/settings/models"),
+  },
+  {
+    name: "Secrets",
+    href: "/settings/secrets",
+    icon: KeyIcon,
+    match: (p) => p.startsWith("/settings/secrets"),
   },
   {
     name: "Security",

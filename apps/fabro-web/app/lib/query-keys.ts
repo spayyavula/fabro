@@ -96,4 +96,7 @@ export const queryKeys = {
   providers: {
     list: () => ["providers", "list"] as const,
   },
+  secrets: {
+    list: () => ["secrets", "list"] as const,
+  },
 };
