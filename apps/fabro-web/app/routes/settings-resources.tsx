@@ -110,7 +110,6 @@ function DiskPanel({ disk }: { disk: SystemDiskResources }) {
         <Row title="Storage path" help="Configured Fabro storage directory.">
           <Mono>{disk.storage_path}</Mono>
         </Row>
-        <FabroStorageRows disk={disk} />
       </Panel>
     );
   }
@@ -127,24 +126,7 @@ function DiskPanel({ disk }: { disk: SystemDiskResources }) {
           }
         />
       </Row>
-      <Row title="Mount point" help="Filesystem containing the storage path.">
-        {disk.mount_point ? <Mono>{disk.mount_point}</Mono> : <Muted>Unknown</Muted>}
-      </Row>
-      <FabroStorageRows disk={disk} />
     </Panel>
-  );
-}
-
-function FabroStorageRows({ disk }: { disk: SystemDiskResources }) {
-  return (
-    <>
-      <Row title="Fabro managed" help="Bytes currently tracked under Fabro storage.">
-        {formatBytesAsMemory(disk.fabro_managed_bytes, 0)}
-      </Row>
-      <Row title="Reclaimable" help="Bytes Fabro can reclaim by pruning inactive data.">
-        {formatBytesAsMemory(disk.fabro_reclaimable_bytes, 0)}
-      </Row>
-    </>
   );
 }
 

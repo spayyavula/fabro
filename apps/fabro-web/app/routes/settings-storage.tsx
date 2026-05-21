@@ -1,7 +1,12 @@
-import type { ServerSettings } from "@qltysh/fabro-api-client";
-import { useServerSettings } from "../lib/queries";
+import type {
+  ServerSettings,
+  SystemDiskResources,
+} from "@qltysh/fabro-api-client";
+import { formatBytesAsMemory } from "../lib/format";
+import { useServerSettings, useSystemResources } from "../lib/queries";
 import {
   Mono,
+  Muted,
   ObjectStoreRows,
   Panel,
   PanelSkeleton,
@@ -24,14 +29,16 @@ const DESCRIPTION = (
 
 export default function SettingsStorage() {
   const settingsQuery = useServerSettings();
+  const resourcesQuery = useSystemResources();
   const settings = settingsQuery.data;
+  const resources = resourcesQuery.data;
 
   return (
     <div className="space-y-6">
       <SettingsPageIntro description={DESCRIPTION} />
-      {settings ? (
+      {settings && resources ? (
         <>
-          <StorageRootPanel settings={settings} />
+          <StorageRootPanel settings={settings} disk={resources.disk} />
           <SlateDbPanel settings={settings} />
           <ArtifactsPanel settings={settings} />
         </>
@@ -46,12 +53,31 @@ export default function SettingsStorage() {
   );
 }
 
-function StorageRootPanel({ settings }: { settings: ServerSettings }) {
+function StorageRootPanel({
+  settings,
+  disk,
+}: {
+  settings: ServerSettings;
+  disk: SystemDiskResources;
+}) {
   const { storage } = settings.server;
   return (
     <Panel title="Storage root">
       <Row title="Path" help="Filesystem path for run state and logs.">
         <Mono>{storage.root}</Mono>
+      </Row>
+      <Row title="Mount point" help="Filesystem containing the storage path.">
+        {disk.mount_point ? (
+          <Mono>{disk.mount_point}</Mono>
+        ) : (
+          <Muted>Unknown</Muted>
+        )}
+      </Row>
+      <Row title="Fabro managed" help="Bytes currently tracked under Fabro storage.">
+        {formatBytesAsMemory(disk.fabro_managed_bytes, 0)}
+      </Row>
+      <Row title="Reclaimable" help="Bytes Fabro can reclaim by pruning inactive data.">
+        {formatBytesAsMemory(disk.fabro_reclaimable_bytes, 0)}
       </Row>
     </Panel>
   );
