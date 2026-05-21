@@ -15,10 +15,10 @@
 
 
 
-export const SessionStatus = {
-    IDLE: 'idle',
-    RUNNING: 'running',
+export const PairStatus = {
+    ACTIVE: 'active',
+    ENDED: 'ended',
     FAILED: 'failed'
 } as const;
 
-export type SessionStatus = typeof SessionStatus[keyof typeof SessionStatus];
+export type PairStatus = typeof PairStatus[keyof typeof PairStatus];

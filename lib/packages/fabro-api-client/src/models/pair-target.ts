@@ -14,11 +14,12 @@
 
 
 
-
-export const SessionStatus = {
-    IDLE: 'idle',
-    RUNNING: 'running',
-    FAILED: 'failed'
-} as const;
-
-export type SessionStatus = typeof SessionStatus[keyof typeof SessionStatus];
+export interface PairTarget {
+    'stage_id': string;
+    'node_id': string;
+    'node_label': string;
+    'visit': number;
+    'agent_session_id': string;
+    'provider'?: string;
+    'model'?: string;
+}

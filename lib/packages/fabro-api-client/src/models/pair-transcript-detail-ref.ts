@@ -14,11 +14,7 @@
 
 
 
-
-export const SessionStatus = {
-    IDLE: 'idle',
-    RUNNING: 'running',
-    FAILED: 'failed'
-} as const;
-
-export type SessionStatus = typeof SessionStatus[keyof typeof SessionStatus];
+export interface PairTranscriptDetailRef {
+    'seq': number;
+    'tool_call_id'?: string;
+}

@@ -15,20 +15,12 @@
 
 // May contain unused imports in some cases
 // @ts-ignore
-import type { SessionStatus } from './session-status';
+import type { PairTranscriptEntry } from './pair-transcript-entry';
+// May contain unused imports in some cases
+// @ts-ignore
+import type { PairTranscriptResponseMeta } from './pair-transcript-response-meta';
 
-/**
- * List projection of an Ask Fabro session.
- */
-export interface SessionSummary {
-    /**
-     * Durable session identifier.
-     */
-    'id': string;
-    'run_id': string;
-    'title'?: string | null;
-    'status': SessionStatus;
-    'model'?: string | null;
-    'created_at': string;
-    'updated_at': string;
+export interface PairTranscriptResponse {
+    'data': Array<PairTranscriptEntry>;
+    'meta': PairTranscriptResponseMeta;
 }
