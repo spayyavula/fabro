@@ -1,15 +1,54 @@
 use std::collections::{HashMap, HashSet};
 use std::path::{Component, Path, PathBuf};
-use std::sync::{Mutex, MutexGuard};
+use std::sync::{Arc, Mutex, MutexGuard};
 
 use fabro_types::ManifestPath;
 use thiserror::Error;
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct TemplateSourceOrigin {
+    source_text:    Arc<str>,
+    fragment_start: usize,
+}
+
+impl TemplateSourceOrigin {
+    #[must_use]
+    fn new(source_text: impl Into<Arc<str>>, fragment_start: usize) -> Self {
+        Self {
+            source_text: source_text.into(),
+            fragment_start,
+        }
+    }
+
+    #[must_use]
+    pub fn from_first_fragment_match(source_text: &str, fragment: &str) -> Option<Self> {
+        source_text
+            .find(fragment)
+            .map(|fragment_start| Self::new(source_text, fragment_start))
+    }
+
+    #[must_use]
+    pub(crate) fn source_text(&self) -> &str {
+        &self.source_text
+    }
+
+    #[must_use]
+    pub(crate) fn clone_source_text(&self) -> Arc<str> {
+        Arc::clone(&self.source_text)
+    }
+
+    #[must_use]
+    pub(crate) fn fragment_start(&self) -> usize {
+        self.fragment_start
+    }
+}
 
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct TemplateSource {
     pub path:    ManifestPath,
     pub root:    ManifestPath,
     pub content: String,
+    pub origin:  Option<TemplateSourceOrigin>,
 }
 
 impl TemplateSource {
@@ -19,7 +58,14 @@ impl TemplateSource {
             path,
             root,
             content: content.into(),
+            origin: None,
         }
+    }
+
+    #[must_use]
+    pub fn with_origin(mut self, origin: TemplateSourceOrigin) -> Self {
+        self.origin = Some(origin);
+        self
     }
 }
 

@@ -4,8 +4,8 @@ use std::sync::Arc;
 
 use fabro_graphviz::graph::{AttrValue, Graph};
 use fabro_template::{
-    TemplateContext, TemplateError, TemplateRenderMode, TemplateSource, TemplateStore,
-    render_lenient_named, render_named, render_source,
+    TemplateContext, TemplateError, TemplateRenderMode, TemplateSource, TemplateSourceOrigin,
+    TemplateStore, render_named_with_origin, render_source,
 };
 use fabro_util::error::collect_chain;
 use fabro_validate::{Diagnostic, Severity};
@@ -35,13 +35,12 @@ pub enum RenderMode {
 
 #[derive(Clone)]
 pub(crate) struct TemplateRenderTarget {
-    pub source_name:   Option<String>,
-    pub source_text:   Option<String>,
-    pub source_offset: Option<usize>,
-    pub node_id:       Option<String>,
-    pub edge:          Option<(String, String)>,
-    pub owner:         String,
-    template_store:    Option<TemplateRenderStore>,
+    pub source_name: Option<String>,
+    pub node_id:     Option<String>,
+    pub edge:        Option<(String, String)>,
+    pub owner:       String,
+    source_origin:   Option<TemplateSourceOrigin>,
+    template_store:  Option<TemplateRenderStore>,
 }
 
 #[derive(Clone)]
@@ -61,8 +60,12 @@ impl TemplateRenderStore {
         text: &str,
         ctx: &TemplateContext,
         mode: TemplateRenderMode,
+        origin: Option<&TemplateSourceOrigin>,
     ) -> Result<String, TemplateError> {
-        let mut source = self.source.clone();
+        let mut source = match origin {
+            Some(origin) => self.source.clone().with_origin(origin.clone()),
+            None => self.source.clone(),
+        };
         text.clone_into(&mut source.content);
         render_source(&source, ctx, Arc::clone(&self.store), mode)
     }
@@ -74,11 +77,10 @@ impl TemplateRenderTarget {
         let attr_name = attr_name.into();
         Self {
             source_name,
-            source_text: None,
-            source_offset: None,
             node_id: None,
             edge: None,
             owner: format!("graph attribute `{attr_name}`"),
+            source_origin: None,
             template_store: None,
         }
     }
@@ -93,11 +95,10 @@ impl TemplateRenderTarget {
         let attr_name = attr_name.into();
         Self {
             source_name,
-            source_text: None,
-            source_offset: None,
             node_id: Some(node_id.clone()),
             edge: None,
             owner: format!("node `{node_id}` attribute `{attr_name}`"),
+            source_origin: None,
             template_store: None,
         }
     }
@@ -114,11 +115,10 @@ impl TemplateRenderTarget {
         let attr_name = attr_name.into();
         Self {
             source_name,
-            source_text: None,
-            source_offset: None,
             node_id: None,
             edge: Some((from.clone(), to.clone())),
             owner: format!("edge `{from} -> {to}` attribute `{attr_name}`"),
+            source_origin: None,
             template_store: None,
         }
     }
@@ -130,9 +130,10 @@ impl TemplateRenderTarget {
     }
 
     #[must_use]
-    pub(crate) fn with_source_text(mut self, source_text: Option<&str>, value: &str) -> Self {
-        self.source_text = source_text.map(ToOwned::to_owned);
-        self.source_offset = source_text.and_then(|source_text| source_text.find(value));
+    pub(crate) fn with_source_origin(mut self, source_text: Option<&str>, value: &str) -> Self {
+        self.source_origin = source_text.and_then(|source_text| {
+            TemplateSourceOrigin::from_first_fragment_match(source_text, value)
+        });
         self
     }
 
@@ -159,11 +160,16 @@ pub(crate) fn render_template_for_target(
 ) -> Result<String, Error> {
     let source_name = target.template_source_name();
     let render_with_mode = |mode| match target.template_store.as_ref() {
-        Some(template_store) => template_store.render(text, ctx, mode),
-        None if matches!(mode, TemplateRenderMode::Strict) => {
-            render_named(source_name.clone(), text, ctx)
+        Some(template_store) => {
+            template_store.render(text, ctx, mode, target.source_origin.as_ref())
         }
-        None => render_lenient_named(source_name.clone(), text, ctx),
+        None => render_named_with_origin(
+            source_name.clone(),
+            text,
+            ctx,
+            mode,
+            target.source_origin.as_ref(),
+        ),
     };
     match render_mode {
         RenderMode::Strict => render_with_mode(TemplateRenderMode::Strict)
@@ -197,16 +203,7 @@ fn template_diagnostic(error: &TemplateError, target: &TemplateRenderTarget) -> 
     };
     let _ = write!(message, " in {}", target.owner);
 
-    let source_location = target
-        .source_text
-        .as_deref()
-        .zip(target.source_offset)
-        .zip(error.span())
-        .and_then(|((source_text, source_offset), span)| {
-            let absolute_offset = source_offset.checked_add(span.offset())?;
-            let (line, column) = source_position(source_text, absolute_offset)?;
-            Some((line, column, absolute_offset, span.len()))
-        });
+    let location = error.location();
 
     Diagnostic {
         rule: TEMPLATE_UNDEFINED_VARIABLE_RULE.to_owned(),
@@ -217,40 +214,13 @@ fn template_diagnostic(error: &TemplateError, target: &TemplateRenderTarget) -> 
         fix: Some(format!(
             "bind `{name}` via `[run.inputs]` in workflow.toml, or pass `--input {name}=<value>`"
         )),
-        source_path: error
-            .source_name()
-            .map(ToOwned::to_owned)
-            .or_else(|| target.source_name.clone()),
-        line: source_location
-            .map(|(line, _, _, _)| line)
-            .or_else(|| error.line()),
-        column: source_location
-            .map(|(_, column, _, _)| column)
-            .or_else(|| error.column()),
-        span_start: source_location
-            .map(|(_, _, span_start, _)| span_start)
-            .or_else(|| error.span().map(|span| span.offset())),
-        span_len: source_location
-            .map(|(_, _, _, span_len)| span_len)
-            .or_else(|| error.span().map(|span| span.len())),
+        source_path: location.source_name.or_else(|| target.source_name.clone()),
+        line: location.line,
+        column: location.column,
+        span_start: location.span_start,
+        span_len: location.span_len,
         related: Vec::new(),
     }
-}
-
-fn source_position(source_text: &str, offset: usize) -> Option<(u32, u32)> {
-    if offset > source_text.len() || !source_text.is_char_boundary(offset) {
-        return None;
-    }
-    let line = source_text[..offset]
-        .bytes()
-        .filter(|byte| *byte == b'\n')
-        .count()
-        + 1;
-    let line_start = source_text[..offset]
-        .rfind('\n')
-        .map_or(0, |index| index + 1);
-    let column = source_text[line_start..offset].chars().count() + 1;
-    Some((u32::try_from(line).ok()?, u32::try_from(column).ok()?))
 }
 
 /// Expands `{{ goal }}` / `{{ inputs.* }}` across all string attributes.
@@ -285,7 +255,7 @@ impl TemplateTransform {
         }
         let ctx = TemplateContext::for_input_scan(self.inputs.clone());
         let target = TemplateRenderTarget::graph_attr(self.source_name.clone(), "goal")
-            .with_source_text(self.source_text.as_deref(), goal);
+            .with_source_origin(self.source_text.as_deref(), goal);
         render_template_for_target(goal, &ctx, self.render_mode, &target, diagnostics)
     }
 
@@ -314,7 +284,7 @@ impl TemplateTransform {
                 }
                 let target = owner_for_attr(attr_name)
                     .with_source_name(source_name.cloned().unwrap_or_else(|| "workflow".into()))
-                    .with_source_text(source_text, text);
+                    .with_source_origin(source_text, text);
                 *text = render_template_for_target(text, ctx, render_mode, &target, diagnostics)?;
             }
         }
