@@ -1489,10 +1489,26 @@ async fn mcp_create_validation_errors_happen_before_auth_or_network() {
         }),
     )
     .await;
+    let conflicting_goal_sources = call_tool_error_text(
+        &client,
+        "fabro_run_create",
+        serde_json::json!({
+            "runs": [{
+                "workflow": "simple.fabro",
+                "goal": "inline goal",
+                "goal_file": "plans/goal.md"
+            }]
+        }),
+    )
+    .await;
 
     assert!(empty.contains("runs"), "{empty}");
     assert!(many.contains("runs"), "{many}");
     assert!(null.contains("decision"), "{null}");
+    assert!(
+        conflicting_goal_sources.contains("goal and goal_file are mutually exclusive"),
+        "{conflicting_goal_sources}"
+    );
     assert_eq!(client.list_tools().await.unwrap().len(), 6);
     client
         .shutdown()
@@ -2266,6 +2282,10 @@ fn assert_create_schema_accepts_string_and_object_specs(schema: &serde_json::Val
     assert!(
         object_variant.pointer("/properties/workflow").is_some(),
         "object create spec should include workflow property: {schema}"
+    );
+    assert!(
+        object_variant.pointer("/properties/goal_file").is_some(),
+        "object create spec should include goal_file property: {schema}"
     );
     assert!(
         object_variant

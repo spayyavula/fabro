@@ -294,6 +294,10 @@ mod tests {
             "object create spec should expose workflow property: {schema}"
         );
         assert!(
+            object_variant.pointer("/properties/goal_file").is_some(),
+            "object create spec should expose goal_file property: {schema}"
+        );
+        assert!(
             object_variant
                 .get("required")
                 .and_then(Value::as_array)

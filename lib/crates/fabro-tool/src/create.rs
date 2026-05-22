@@ -113,6 +113,13 @@ impl JsonSchema for CreateRunSpecInput {
                             ],
                             "description": "Optional goal override for the run."
                         },
+                        "goal_file": {
+                            "anyOf": [
+                                { "type": "string" },
+                                { "type": "null" }
+                            ],
+                            "description": "Read the run goal from a file. Mutually exclusive with goal. Relative paths are resolved from the run cwd."
+                        },
                         "inputs": {
                             "type": "object",
                             "description": "Workflow input overrides keyed by input name.",
@@ -194,6 +201,7 @@ pub struct CreateRunSpec {
     pub run_id:           Option<String>,
     pub parent_id:        Option<String>,
     pub goal:             Option<String>,
+    pub goal_file:        Option<PathBuf>,
     #[serde(default)]
     pub inputs:           HashMap<String, RunInputValue>,
     #[serde(default)]
@@ -257,6 +265,7 @@ pub struct ValidatedCreateRunSpec {
     pub run_id:           Option<RunId>,
     pub parent_id:        Option<String>,
     pub goal:             Option<String>,
+    pub goal_file:        Option<PathBuf>,
     pub inputs:           HashMap<String, toml::Value>,
     pub labels:           HashMap<String, String>,
     pub dry_run:          Option<bool>,
@@ -298,6 +307,7 @@ impl TryFrom<CreateRunSpecInput> for ValidatedCreateRunSpec {
                     run_id:           None,
                     parent_id:        None,
                     goal:             None,
+                    goal_file:        None,
                     inputs:           HashMap::new(),
                     labels:           HashMap::new(),
                     dry_run:          None,
@@ -335,6 +345,18 @@ impl TryFrom<CreateRunSpec> for ValidatedCreateRunSpec {
         if spec.parent_id.is_some() && parent_id.is_none() {
             return Err(ToolError::message("parent_id must not be blank"));
         }
+        if spec.goal.is_some() && spec.goal_file.is_some() {
+            return Err(ToolError::message(
+                "goal and goal_file are mutually exclusive; use exactly one",
+            ));
+        }
+        if spec
+            .goal_file
+            .as_ref()
+            .is_some_and(|path| path.as_os_str().is_empty())
+        {
+            return Err(ToolError::message("goal_file must not be blank"));
+        }
         let inputs = spec
             .inputs
             .into_iter()
@@ -349,6 +371,7 @@ impl TryFrom<CreateRunSpec> for ValidatedCreateRunSpec {
             run_id,
             parent_id,
             goal: spec.goal,
+            goal_file: spec.goal_file,
             inputs,
             labels: spec.labels,
             dry_run: spec.dry_run,
@@ -517,6 +540,7 @@ mod tests {
             run_id:           None,
             parent_id:        Some(" nightly-parent ".to_string()),
             goal:             None,
+            goal_file:        None,
             inputs:           HashMap::new(),
             labels:           HashMap::new(),
             dry_run:          None,
@@ -578,6 +602,46 @@ mod tests {
     }
 
     #[test]
+    fn create_params_preserve_goal_file_option() {
+        let params: FabroRunCreateParams = serde_json::from_value(json!({
+            "runs": [{
+                "workflow": "implement-plan",
+                "goal_file": "plans/ship-it.md",
+                "start": false
+            }]
+        }))
+        .expect("object form with goal_file should deserialize");
+
+        let params = ValidatedCreateRuns::try_from(params).expect("goal_file should validate");
+        let spec = &params.runs[0];
+        assert_eq!(spec.goal, None);
+        assert_eq!(
+            spec.goal_file.as_deref(),
+            Some(Path::new("plans/ship-it.md"))
+        );
+    }
+
+    #[test]
+    fn create_params_reject_goal_and_goal_file_together() {
+        let params: FabroRunCreateParams = serde_json::from_value(json!({
+            "runs": [{
+                "workflow": "implement-plan",
+                "goal": "inline goal",
+                "goal_file": "plans/ship-it.md"
+            }]
+        }))
+        .expect("object form with both goal forms should deserialize before validation");
+
+        let err = ValidatedCreateRuns::try_from(params)
+            .expect_err("goal and goal_file should be mutually exclusive");
+        assert!(
+            err.to_string()
+                .contains("goal and goal_file are mutually exclusive"),
+            "{err}"
+        );
+    }
+
+    #[test]
     fn create_params_reject_blank_string_shorthand_workflow() {
         let params: FabroRunCreateParams = serde_json::from_value(json!({
             "runs": ["  "]
@@ -621,6 +685,7 @@ mod tests {
                     run_id:           None,
                     parent_id:        Some("nightly-parent".to_string()),
                     goal:             None,
+                    goal_file:        None,
                     inputs:           HashMap::new(),
                     labels:           HashMap::new(),
                     dry_run:          Some(true),
@@ -670,6 +735,7 @@ mod tests {
                     run_id:           None,
                     parent_id:        Some("nightly-parent".to_string()),
                     goal:             None,
+                    goal_file:        None,
                     inputs:           HashMap::new(),
                     labels:           HashMap::new(),
                     dry_run:          Some(true),
@@ -718,6 +784,7 @@ mod tests {
                     run_id:           None,
                     parent_id:        Some(parent_id.to_string()),
                     goal:             None,
+                    goal_file:        None,
                     inputs:           HashMap::new(),
                     labels:           HashMap::new(),
                     dry_run:          Some(true),
