@@ -57,6 +57,134 @@ fn parse_status(value: &str, allow_deleted: bool) -> Result<TodoStatus, String> 
     Ok(status)
 }
 
+const TASK_CREATE_DESCRIPTION: &str = r#"Use this tool to create a structured task list for your current coding session. This helps you track progress, organize complex tasks, and demonstrate thoroughness to the user.
+It also helps the user understand the progress of the task and overall progress of their requests.
+
+## When to Use This Tool
+
+Use this tool proactively in these scenarios:
+
+- Complex multi-step tasks - When a task requires 3 or more distinct steps or actions
+- Non-trivial and complex tasks - Tasks that require careful planning or multiple operations
+- Plan mode - When using plan mode, create a task list to track the work
+- User explicitly requests todo list - When the user directly asks you to use the todo list
+- User provides multiple tasks - When users provide a list of things to be done, either numbered or comma-separated
+- After receiving new instructions - Immediately capture user requirements as tasks
+- When you start working on a task - Mark it as in_progress BEFORE beginning work
+- After completing a task - Mark it as completed and add any new follow-up tasks discovered during implementation
+
+## When NOT to Use This Tool
+
+Skip using this tool when:
+
+- There is only a single, straightforward task
+- The task is trivial and tracking it provides no organizational benefit
+- The task can be completed in less than 3 trivial steps
+- The task is purely conversational or informational
+
+NOTE that you should not use this tool if there is only one trivial task to do. In this case you are better off just doing the task directly.
+
+## Task Fields
+
+- **subject**: A brief, actionable title in imperative form, such as "Fix authentication bug in login flow"
+- **description**: What needs to be done
+- **activeForm** (optional): Present continuous form shown in the spinner when the task is in_progress, such as "Fixing authentication bug". If omitted, the spinner shows the subject instead.
+
+All tasks are created with status `pending`.
+
+## Tips
+
+- Create tasks with clear, specific subjects that describe the outcome
+- After creating tasks, use TaskUpdate to set up dependencies with addBlocks or addBlockedBy if needed
+- Check TaskList first to avoid creating duplicate tasks"#;
+
+const TASK_UPDATE_DESCRIPTION: &str = r#"Use this tool to update a task in the task list.
+
+## When to Use This Tool
+
+**Mark tasks as resolved:**
+
+- When you have completed the work described in a task
+- When a task is no longer needed or has been superseded
+- Mark tasks as in_progress when you start working on them
+- Mark tasks as completed immediately after finishing them
+- ONLY mark a task as completed when you have FULLY accomplished it
+- If you encounter errors, blockers, or cannot finish, keep the task as in_progress
+- When blocked, create a new task describing what needs to be resolved
+- Never mark a task as completed if tests are failing, implementation is partial, unresolved errors remain, or required files/dependencies could not be found
+
+**Delete tasks:**
+
+- When a task is no longer relevant or was created in error
+- Set status to `deleted` to permanently remove a task
+
+**Update task details:**
+
+- When requirements change or become clearer
+- When establishing dependencies between tasks
+- When assigning task ownership
+
+## Fields You Can Update
+
+- **status**: Task status. See Status Workflow below.
+- **subject**: Change the task title in imperative form, such as "Run tests"
+- **description**: Change the task description
+- **activeForm**: Present continuous form shown in the spinner when in_progress, such as "Running tests"
+- **owner**: Change the task owner
+- **metadata**: Merge metadata keys into the task. Set a key to null to delete it.
+- **addBlocks**: Mark tasks that cannot start until this one completes
+- **addBlockedBy**: Mark tasks that must complete before this one can start
+
+## Status Workflow
+
+Status progresses: `pending` -> `in_progress` -> `completed`.
+
+Use `deleted` to permanently remove a task.
+
+## Examples
+
+Mark task as in progress when starting work:
+```json
+{"taskId": "1", "status": "in_progress"}
+```
+
+Mark task as completed after finishing work:
+```json
+{"taskId": "1", "status": "completed"}
+```
+
+Delete a task:
+```json
+{"taskId": "1", "status": "deleted"}
+```
+
+Set up task dependencies:
+```json
+{"taskId": "2", "addBlockedBy": ["1"]}
+```"#;
+
+const TASK_LIST_DESCRIPTION: &str = r#"Use this tool to list all tasks in the task list.
+
+## When to Use This Tool
+
+- To see what tasks are available to work on
+- To check overall progress on the project
+- To find tasks that are blocked and need dependencies resolved
+- After completing a task, to check for newly unblocked work or the next available task
+- Prefer working on tasks in ID order, lowest ID first, when multiple tasks are available because earlier tasks often set up context for later ones
+
+## Output
+
+Returns a summary of each task:
+
+- **id**: Task identifier to use with TaskUpdate
+- **subject**: Brief description of the task
+- **status**: pending, in_progress, or completed
+- **owner**: Owner if assigned
+- **blockedBy**: List of open task IDs that must be resolved first. Tasks with blockedBy entries should not be started until dependencies resolve.
+
+Use TaskUpdate to change task status, owner, details, or dependencies."#;
+
 /// Deterministic todo id derived from `<list_id>::<step>`. Codex identifies
 /// a plan step by the exact step text, so the projection ID is the
 /// `sha256(list_id, step)` truncated for compactness.
@@ -249,7 +377,7 @@ pub fn make_task_create_tool(runtime: Arc<TodoRuntime>) -> RegisteredTool {
     RegisteredTool {
         definition: ToolDefinition {
             name:        "TaskCreate".into(),
-            description: "Create a new task in the shared task list".into(),
+            description: TASK_CREATE_DESCRIPTION.into(),
             parameters:  serde_json::json!({
                 "type": "object",
                 "properties": {
@@ -298,7 +426,7 @@ pub fn make_task_update_tool(runtime: Arc<TodoRuntime>) -> RegisteredTool {
     RegisteredTool {
         definition: ToolDefinition {
             name:        "TaskUpdate".into(),
-            description: "Update an existing task. status: \"deleted\" deletes it.".into(),
+            description: TASK_UPDATE_DESCRIPTION.into(),
             parameters:  serde_json::json!({
                 "type": "object",
                 "properties": {
@@ -366,7 +494,7 @@ pub fn make_task_list_tool(runtime: Arc<TodoRuntime>) -> RegisteredTool {
     RegisteredTool {
         definition: ToolDefinition {
             name:        "TaskList".into(),
-            description: "List all tasks in the shared task list".into(),
+            description: TASK_LIST_DESCRIPTION.into(),
             parameters:  serde_json::json!({
                 "type": "object",
                 "properties": {},
@@ -600,6 +728,56 @@ mod tests {
         assert_eq!(list.items[0].id, "1");
         assert_eq!(list.items[0].subject, "Do thing");
         assert_eq!(list.items[0].description, "details");
+    }
+
+    #[test]
+    fn anthropic_task_tool_descriptions_include_claude_code_guidance() {
+        let runtime = Arc::new(TodoRuntime::new());
+        let create = make_task_create_tool(runtime.clone());
+        let update = make_task_update_tool(runtime.clone());
+        let list = make_task_list_tool(runtime);
+
+        assert!(
+            create
+                .definition
+                .description
+                .contains("structured task list")
+        );
+        assert!(
+            create
+                .definition
+                .description
+                .contains("## When to Use This Tool")
+        );
+        assert!(create.definition.description.contains("## Task Fields"));
+        assert!(create.definition.description.contains("TaskUpdate"));
+        assert!(create.definition.description.contains("TaskList"));
+
+        assert!(update.definition.description.contains("## Status Workflow"));
+        assert!(
+            update
+                .definition
+                .description
+                .contains("ONLY mark a task as completed")
+        );
+        assert!(
+            update
+                .definition
+                .description
+                .contains("status to `deleted`")
+        );
+
+        assert!(
+            list.definition
+                .description
+                .contains("## When to Use This Tool")
+        );
+        assert!(list.definition.description.contains("blocked"));
+        assert!(
+            list.definition
+                .description
+                .contains("Prefer working on tasks in ID order")
+        );
     }
 
     #[tokio::test]
