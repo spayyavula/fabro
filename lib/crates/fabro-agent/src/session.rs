@@ -30,7 +30,6 @@ use crate::event::Emitter;
 use crate::file_tracker::FileTracker;
 use crate::history::History;
 use crate::loop_detection::detect_loop;
-use crate::mcp_integration;
 use crate::memory::{BUDGET_BYTES, MemoryDocument, discover_memory};
 use crate::profiles::EnvContext;
 use crate::sandbox::Sandbox;
@@ -43,6 +42,7 @@ use crate::types::{
     AgentEvent, McpToolSummary, MemoryFileSummary, Message, SessionEvent, SessionState,
     SkillActivationSource, SkillSummary,
 };
+use crate::{mcp_integration, task_reminder};
 
 /// One queued external control item for a live session.
 #[derive(Debug, Clone)]
@@ -1273,6 +1273,8 @@ impl Session {
             // Pre-turn compaction: trim context before building the request
             self.compact_if_needed().await;
 
+            self.inject_task_reminder_if_needed();
+
             // Build request
             let request = self.build_request();
 
@@ -1796,6 +1798,23 @@ impl Session {
             speed: self.config.speed,
             metadata: None,
             provider_options: None,
+        }
+    }
+
+    fn inject_task_reminder_if_needed(&mut self) {
+        let tools = self
+            .provider_profile
+            .tool_registry()
+            .definitions_for_policy(
+                self.config.tool_access_policy.as_deref(),
+                self.config.tool_exposure_mode,
+            );
+        let tool_names: Vec<&str> = tools.iter().map(|tool| tool.name.as_str()).collect();
+        if let Some(reminder) = task_reminder::maybe_reminder(&self.history, &tool_names) {
+            self.history.push(Message::System {
+                content:   reminder,
+                timestamp: SystemTime::now(),
+            });
         }
     }
 }
@@ -2968,6 +2987,41 @@ mod tests {
         assert_eq!(tool_names.len(), 2);
         assert!(tool_names.contains(&"read_file"));
         assert!(tool_names.contains(&"write_file"));
+    }
+
+    #[tokio::test]
+    async fn request_injects_task_reminder_after_ten_unused_assistant_turns() {
+        let provider = Arc::new(CapturingLlmProvider::new());
+        let provider_ref = provider.clone();
+        let client = make_client(provider as Arc<dyn ProviderAdapter>).await;
+        let mut registry = ToolRegistry::new();
+        registry.register(make_named_noop_tool("TaskCreate"));
+        registry.register(make_named_noop_tool("TaskUpdate"));
+        let profile = Arc::new(TestProfile::with_tools(registry));
+        let env = Arc::new(MockSandbox::default());
+        let mut session = Session::new(client, profile, env, SessionOptions::default(), None);
+
+        for index in 0..10 {
+            session
+                .process_input(&format!("turn {index}"))
+                .await
+                .unwrap();
+        }
+        session.process_input("turn 10").await.unwrap();
+
+        let captured = provider_ref.captured_request.lock().unwrap();
+        let request = captured
+            .as_ref()
+            .expect("request should have been captured");
+        assert!(
+            request.messages.iter().any(|message| {
+                message.role == Role::System
+                    && message.text().contains("<system-reminder>")
+                    && message.text().contains("TaskCreate")
+                    && message.text().contains("TaskUpdate")
+            }),
+            "request should include task reminder system message"
+        );
     }
 
     #[tokio::test]

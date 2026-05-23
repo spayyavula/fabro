@@ -4,7 +4,7 @@
 //!
 //! - [`make_update_plan_tool`] — Codex-compatible OpenAI `update_plan`.
 //! - [`make_task_create_tool`] / [`make_task_update_tool`] /
-//!   [`make_task_list_tool`] — Claude task tools.
+//!   [`make_task_get_tool`] / [`make_task_list_tool`] — Claude task tools.
 
 use std::collections::{BTreeMap, HashMap, HashSet};
 use std::fmt::Write;
@@ -58,15 +58,19 @@ fn parse_status(value: &str, allow_deleted: bool) -> Result<TodoStatus, String> 
 }
 
 const TASK_CREATE_DESCRIPTION: &str = "Create pending tasks in the current session. \
-Use concise subjects, descriptions, optional activeForm text for in-progress display, \
-and metadata when callers need structured labels.";
+Use concise subjects, descriptions, optional activeForm text, and metadata. Check \
+TaskList first to avoid duplicate tasks.";
 
 const TASK_UPDATE_DESCRIPTION: &str = "Update an existing task's status, text, owner, \
 metadata, or dependencies. Valid statuses are pending, in_progress, completed, and \
-deleted; deleted removes a task from active work.";
+deleted. After completing a task, call TaskList to find newly unblocked work.";
 
 const TASK_LIST_DESCRIPTION: &str = "List tasks for the current session, including \
-status, owner, and blocking dependencies.";
+status, owner, and blocking dependencies. Use TaskGet with a taskId for full \
+description and dependency details.";
+
+const TASK_GET_DESCRIPTION: &str = "Get one task by taskId, including subject, status, \
+description, owner, blockedBy, and blocks.";
 
 /// Deterministic todo id derived from `<list_id>::<step>`. Codex identifies
 /// a plan step by the exact step text, so the projection ID is the
@@ -254,6 +258,32 @@ fn metadata_map(args: &Value) -> BTreeMap<String, Value> {
         .unwrap_or_default()
 }
 
+fn append_task_refs(out: &mut String, label: &str, task_ids: &[String]) {
+    if task_ids.is_empty() {
+        return;
+    }
+    let _ = write!(out, "\n{label}: ");
+    for (index, task_id) in task_ids.iter().enumerate() {
+        if index > 0 {
+            out.push_str(", ");
+        }
+        let _ = write!(out, "#{task_id}");
+    }
+}
+
+fn format_task_details(todo: &TodoProjection) -> String {
+    let mut out = format!(
+        "Task #{}: {}\nStatus: {}\nDescription: {}",
+        todo.id, todo.subject, todo.status, todo.description
+    );
+    if let Some(owner) = todo.owner.as_ref() {
+        let _ = write!(out, "\nOwner: {owner}");
+    }
+    append_task_refs(&mut out, "Blocked by", &todo.blocked_by);
+    append_task_refs(&mut out, "Blocks", &todo.blocks);
+    out
+}
+
 #[must_use]
 pub fn make_task_create_tool(runtime: Arc<TodoRuntime>) -> RegisteredTool {
     let counters = Arc::new(AnthropicTaskCounters::default());
@@ -367,6 +397,42 @@ pub fn make_task_update_tool(runtime: Arc<TodoRuntime>) -> RegisteredTool {
                     // Anthropic spec: missing task returns a non-error result.
                     Ok("Task not found".to_string())
                 }
+            })
+        }),
+    }
+}
+
+#[must_use]
+pub fn make_task_get_tool(runtime: Arc<TodoRuntime>) -> RegisteredTool {
+    RegisteredTool {
+        definition: ToolDefinition {
+            name:        "TaskGet".into(),
+            description: TASK_GET_DESCRIPTION.into(),
+            parameters:  serde_json::json!({
+                "type": "object",
+                "properties": {
+                    "taskId": {"type": "string"}
+                },
+                "required": ["taskId"]
+            }),
+        },
+        executor:   Arc::new(move |args, ctx| {
+            let runtime = runtime.clone();
+            Box::pin(async move {
+                let list_id = anthropic_task_scope(&ctx)?;
+                let task_id = args
+                    .get("taskId")
+                    .and_then(Value::as_str)
+                    .ok_or_else(|| "Missing required parameter: taskId".to_string())?;
+
+                let Some(snapshot) = runtime.snapshot(&list_id) else {
+                    return Ok("Task not found".to_string());
+                };
+                let Some(todo) = snapshot.get(task_id) else {
+                    return Ok("Task not found".to_string());
+                };
+
+                Ok(format_task_details(todo))
             })
         }),
     }
@@ -801,6 +867,67 @@ mod tests {
         let tool = make_task_update_tool(runtime);
         let out = (tool.executor)(
             serde_json::json!({"taskId": "999", "status": "completed"}),
+            ctx_for("ses_a", "ses_a"),
+        )
+        .await
+        .unwrap();
+        assert_eq!(out, "Task not found");
+    }
+
+    #[tokio::test]
+    async fn task_get_returns_full_task_details() {
+        let runtime = Arc::new(TodoRuntime::new());
+        let create = make_task_create_tool(runtime.clone());
+        let update = make_task_update_tool(runtime.clone());
+        let get = make_task_get_tool(runtime);
+
+        (create.executor)(
+            serde_json::json!({
+                "subject": "Investigate failing tests",
+                "description": "Find the failing assertions and identify the smallest fix."
+            }),
+            ctx_for("ses_a", "ses_a"),
+        )
+        .await
+        .unwrap();
+        (update.executor)(
+            serde_json::json!({
+                "taskId": "1",
+                "status": "in_progress",
+                "owner": "agent-1",
+                "addBlockedBy": ["2", "3"],
+                "addBlocks": ["4"]
+            }),
+            ctx_for("ses_a", "ses_a"),
+        )
+        .await
+        .unwrap();
+
+        let out = (get.executor)(
+            serde_json::json!({"taskId": "1"}),
+            ctx_for("ses_a", "ses_a"),
+        )
+        .await
+        .unwrap();
+
+        assert_eq!(
+            out,
+            "\
+Task #1: Investigate failing tests
+Status: in_progress
+Description: Find the failing assertions and identify the smallest fix.
+Owner: agent-1
+Blocked by: #2, #3
+Blocks: #4"
+        );
+    }
+
+    #[tokio::test]
+    async fn task_get_missing_task_returns_not_found() {
+        let runtime = Arc::new(TodoRuntime::new());
+        let tool = make_task_get_tool(runtime);
+        let out = (tool.executor)(
+            serde_json::json!({"taskId": "999"}),
             ctx_for("ses_a", "ses_a"),
         )
         .await

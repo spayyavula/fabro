@@ -9,7 +9,9 @@ use crate::profiles::{BaseProfile, assemble_system_prompt};
 use crate::sandbox::Sandbox;
 use crate::skills::Skill;
 use crate::todo_runtime::TodoRuntime;
-use crate::todo_tools::{make_task_create_tool, make_task_list_tool, make_task_update_tool};
+use crate::todo_tools::{
+    make_task_create_tool, make_task_get_tool, make_task_list_tool, make_task_update_tool,
+};
 use crate::tool_registry::ToolRegistry;
 use crate::tools::{WebFetchSummarizer, make_edit_file_tool, register_core_tools};
 
@@ -17,18 +19,21 @@ pub struct AnthropicProfile {
     base: BaseProfile,
 }
 
-fn anthropic_core_prompt() -> String {
-    [
+fn anthropic_core_prompt(has_spawn_agent: bool) -> String {
+    let mut sections = vec![
         intro_section(),
         system_section(),
         "{env_block}",
         doing_tasks_section(),
         executing_actions_section(),
         using_tools_section(),
+        session_specific_guidance_section(has_spawn_agent),
+        communicating_with_user_section(),
         tone_and_style_section(),
         coding_best_practices_section(),
-    ]
-    .join("\n\n")
+    ];
+    sections.retain(|section| !section.is_empty());
+    sections.join("\n\n")
 }
 
 fn intro_section() -> &'static str {
@@ -93,7 +98,8 @@ resetting git state, changing shared infrastructure, posting messages, and publi
 to third-party services.
 
 When you encounter an obstacle, do not use destructive actions as a shortcut. Investigate \
-unexpected files, branches, locks, and configuration before deleting or overwriting them."
+unexpected files, branches, locks, and configuration before deleting or overwriting them. Before \
+deleting, replacing, or overwriting anything, read or inspect it first."
 }
 
 fn using_tools_section() -> &'static str {
@@ -107,48 +113,42 @@ dedicated tools helps the user understand and review your work.
   - To create files use write_file instead of cat with heredoc or echo redirection.
   - To search for files use glob instead of find or ls.
   - To search file contents use grep instead of shell grep or rg.
+  - To search the internet use web_search, and to inspect a specific URL use web_fetch.
   - Reserve shell for system commands, tests, builds, and terminal operations that require \
 shell execution.
 - Break down and manage your work with the TaskCreate tool. These tools are helpful for \
-planning your work and helping the user track your progress. Mark each task as completed as \
-soon as you are done with the task. Do not batch up multiple tasks before marking them as \
-completed.
+planning your work and helping the user track your progress. Use TaskUpdate to keep task \
+status current, TaskList to review current work, and TaskGet when you need full details for \
+a specific task. Mark each task as completed as soon as you are done with the task. Do not \
+batch up multiple tasks before marking them as completed.
 - You can call multiple tools in a single response. If there are no dependencies between the \
 calls, make independent tool calls in parallel. If one call depends on another call's result, \
-run them sequentially.
+run them sequentially."
+}
 
-## read_file
-Read files before editing them. Always read a file before attempting to edit it. Use \
-offset/limit for large files. Reading a file you have not read before is always appropriate.
+fn session_specific_guidance_section(has_spawn_agent: bool) -> &'static str {
+    if has_spawn_agent {
+        "\
+# Session-specific guidance
 
-## edit_file
-Performs exact string replacements in files. The old_string must be an exact match of existing \
-text and must be unique in the file. If old_string matches multiple locations, provide more \
-surrounding context to make it unique. Prefer editing existing files over creating new ones. \
-When editing text, preserve the exact indentation as it appears in the file.
+- Subagents are valuable for independent work or context isolation. Use spawn_agent when a \
+task can proceed independently or when raw exploration output would distract from the main \
+thread, and avoid duplicating work that subagents are already doing. After delegating, wait for \
+their results and synthesize them before reporting back to the user."
+    } else {
+        ""
+    }
+}
 
-## write_file
-Use write_file only when creating new files. Prefer edit_file for modifying existing files. \
-Always prefer editing existing files in the codebase over creating new ones.
+fn communicating_with_user_section() -> &'static str {
+    "\
+# Communicating with the user
 
-## shell
-Use for running commands, tests, and builds. Default timeout is 120 seconds. Use timeout_ms \
-for longer-running commands.
-
-## grep
-Search file contents with regex patterns. Supports output modes: content, files_with_matches, \
-and count. Use this for searching file contents rather than shell grep or rg.
-
-## glob
-Find files by name pattern. Results are sorted by modification time, newest first. Use this \
-for finding files rather than shell find or ls.
-
-## web_search
-Search the web using Brave Search. Returns titles, URLs, and descriptions.
-
-## web_fetch
-Fetch content from a URL and optionally summarize it. Pass a prompt to extract specific \
-information instead of returning the full page. URLs must start with http:// or https://."
+- Before your first tool call, briefly state what you're about to do in one concise sentence.
+- While working, give short updates at meaningful milestones, especially when you discover a \
+root cause, change direction, or complete a substantial step.
+- Do not expose internal deliberation. Share conclusions, relevant evidence, and next actions.
+- Do not create planning documents unless the user asks for one."
 }
 
 fn tone_and_style_section() -> &'static str {
@@ -193,6 +193,7 @@ impl AnthropicProfile {
         let todo_runtime = Arc::new(TodoRuntime::new());
         registry.register(make_task_create_tool(todo_runtime.clone()));
         registry.register(make_task_update_tool(todo_runtime.clone()));
+        registry.register(make_task_get_tool(todo_runtime.clone()));
         registry.register(make_task_list_tool(todo_runtime));
 
         Self {
@@ -253,7 +254,8 @@ impl AgentProfile for AnthropicProfile {
         user_instructions: Option<&str>,
         skills: &[Skill],
     ) -> String {
-        let core_prompt = anthropic_core_prompt();
+        let has_spawn_agent = self.base.registry.get("spawn_agent").is_some();
+        let core_prompt = anthropic_core_prompt(has_spawn_agent);
 
         assemble_system_prompt(
             &core_prompt,
@@ -313,22 +315,17 @@ mod tests {
         assert!(prompt.contains("linux"));
         assert!(prompt.contains("/home/test"));
         assert!(prompt.contains("# Using your tools"));
-        // Verify expanded tool guidance
         assert!(
-            prompt.contains("old_string must be"),
-            "prompt should contain edit_file guidance about old_string"
+            prompt.contains("Do NOT use the shell tool to run commands when a relevant dedicated tool is provided"),
+            "prompt should prefer dedicated tools"
         );
         assert!(
-            prompt.contains("exact match"),
-            "prompt should contain edit_file guidance about exact match"
+            prompt.contains("Use TaskUpdate to keep task status current"),
+            "prompt should mention real task management tools"
         );
         assert!(
-            prompt.contains("Read files before editing"),
-            "prompt should contain read_file guidance"
-        );
-        assert!(
-            prompt.contains("Default timeout is 120 seconds"),
-            "prompt should contain shell timeout guidance"
+            !prompt.contains("## read_file"),
+            "prompt should rely on tool descriptions for detailed per-tool usage"
         );
         assert!(
             prompt.contains("Write clean, maintainable code"),
@@ -363,6 +360,42 @@ mod tests {
             prompt.contains("Mark each task as completed as soon as you are done"),
             "prompt should discourage batched task completion"
         );
+    }
+
+    #[test]
+    fn anthropic_system_prompt_contains_communication_and_safety_guidance() {
+        let profile = AnthropicProfile::new("claude-sonnet-4-20250514");
+        let env = MockSandbox::linux();
+        let prompt = profile.build_system_prompt(&env, &EnvContext::default(), &[], None, &[]);
+
+        assert!(
+            prompt.contains("Before your first tool call, briefly state what you're about to do")
+        );
+        assert!(prompt.contains("Do not expose internal deliberation"));
+        assert!(prompt.contains("Do not create planning documents unless the user asks"));
+        assert!(prompt.contains("ask the user before proceeding"));
+        assert!(prompt.contains("read or inspect it first"));
+        assert!(prompt.contains("Report outcomes faithfully"));
+    }
+
+    #[test]
+    fn anthropic_system_prompt_includes_subagent_guidance_only_when_registered() {
+        let env = MockSandbox::linux();
+        let profile = AnthropicProfile::new("claude-sonnet-4-20250514");
+        let prompt = profile.build_system_prompt(&env, &EnvContext::default(), &[], None, &[]);
+        assert!(!prompt.contains("Subagents are valuable for independent work"));
+
+        let mut profile = AnthropicProfile::new("claude-sonnet-4-20250514");
+        let manager = Arc::new(AsyncMutex::new(SubAgentManager::new(3)));
+        let factory: SessionFactory = Arc::new(|| {
+            panic!("should not be called in test");
+        });
+        profile.register_subagent_tools(manager, factory, 0);
+        let prompt = profile.build_system_prompt(&env, &EnvContext::default(), &[], None, &[]);
+
+        assert!(prompt.contains("Subagents are valuable for independent work"));
+        assert!(prompt.contains("avoid duplicating work"));
+        assert!(prompt.contains("wait for their results and synthesize them"));
     }
 
     #[test]
@@ -411,7 +444,7 @@ mod tests {
     fn anthropic_tools_registered() {
         let profile = AnthropicProfile::new("claude-sonnet-4-20250514");
         let names = profile.tool_registry().names();
-        assert_eq!(names.len(), 11);
+        assert_eq!(names.len(), 12);
         assert!(names.contains(&"read_file".to_string()));
         assert!(names.contains(&"write_file".to_string()));
         assert!(names.contains(&"edit_file".to_string()));
@@ -422,6 +455,7 @@ mod tests {
         assert!(names.contains(&"web_fetch".to_string()));
         assert!(names.contains(&"TaskCreate".to_string()));
         assert!(names.contains(&"TaskUpdate".to_string()));
+        assert!(names.contains(&"TaskGet".to_string()));
         assert!(names.contains(&"TaskList".to_string()));
     }
 
@@ -435,7 +469,7 @@ mod tests {
     #[test]
     fn anthropic_register_subagent_tools() {
         let mut profile = AnthropicProfile::new("claude-sonnet-4-20250514");
-        assert_eq!(profile.tool_registry().names().len(), 11);
+        assert_eq!(profile.tool_registry().names().len(), 12);
 
         let manager = Arc::new(AsyncMutex::new(SubAgentManager::new(3)));
         let factory: SessionFactory = Arc::new(|| {
@@ -445,7 +479,7 @@ mod tests {
         profile.register_subagent_tools(manager, factory, 0);
 
         let names = profile.tool_registry().names();
-        assert_eq!(names.len(), 15, "should have 11 base + 4 subagent tools");
+        assert_eq!(names.len(), 16, "should have 12 base + 4 subagent tools");
         assert!(names.contains(&"spawn_agent".to_string()));
         assert!(names.contains(&"send_input".to_string()));
         assert!(names.contains(&"wait".to_string()));

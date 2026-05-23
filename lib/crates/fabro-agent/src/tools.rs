@@ -85,7 +85,7 @@ pub fn make_read_file_tool() -> RegisteredTool {
     RegisteredTool {
         definition: ToolDefinition {
             name:        "read_file".into(),
-            description: "Read the contents of a file".into(),
+            description: "Read files before editing them. Returns line-numbered text and supports offset/limit for large files. Use this instead of shell cat, head, tail, or sed when inspecting repository files.".into(),
             parameters:  serde_json::json!({
                 "type": "object",
                 "properties": {
@@ -119,7 +119,7 @@ pub fn make_write_file_tool() -> RegisteredTool {
     RegisteredTool {
         definition: ToolDefinition {
             name:        "write_file".into(),
-            description: "Write content to a file".into(),
+            description: "Create new files, or overwrite an existing file only when replacement is explicitly intended. Prefer edit_file for targeted changes to existing files because write_file overwrites the full file content.".into(),
             parameters:  serde_json::json!({
                 "type": "object",
                 "properties": {
@@ -149,7 +149,7 @@ pub fn make_edit_file_tool() -> RegisteredTool {
     RegisteredTool {
         definition: ToolDefinition {
             name:        "edit_file".into(),
-            description: "Edit a file by replacing a string".into(),
+            description: "Edit a file by replacing an exact string. The old_string must be an exact match and unique unless replace_all is true; include surrounding context when needed. Read the file first and preserve existing indentation.".into(),
             parameters:  serde_json::json!({
                 "type": "object",
                 "properties": {
@@ -215,7 +215,7 @@ pub fn make_shell_tool_with_config(config: &SessionOptions) -> RegisteredTool {
     RegisteredTool {
         definition: ToolDefinition {
             name:        "shell".into(),
-            description: "Execute a shell command".into(),
+            description: "Execute shell commands for terminal operations, package managers, tests and builds. Use dedicated tools for file reads, file edits, filename searches, and content searches. Provide timeout_ms for long-running commands.".into(),
             parameters:  serde_json::json!({
                 "type": "object",
                 "properties": {
@@ -278,7 +278,7 @@ pub fn make_grep_tool() -> RegisteredTool {
     RegisteredTool {
         definition: ToolDefinition {
             name:        "grep".into(),
-            description: "Search file contents with a regex pattern".into(),
+            description: "Search file contents with a regex pattern. Use path to choose the search root, glob_filter to limit matching files, case_insensitive for case folding, and max_results to cap output.".into(),
             parameters:  serde_json::json!({
                 "type": "object",
                 "properties": {
@@ -342,7 +342,7 @@ pub fn make_glob_tool() -> RegisteredTool {
     RegisteredTool {
         definition: ToolDefinition {
             name:        "glob".into(),
-            description: "Find files matching a glob pattern".into(),
+            description: "Find files by file names using a glob pattern. Use path to choose the search root. Prefer this over shell find or ls when locating repository files.".into(),
             parameters:  serde_json::json!({
                 "type": "object",
                 "properties": {
@@ -522,7 +522,7 @@ fn make_web_search_tool_with_api_key(api_key: Option<String>) -> RegisteredTool 
     RegisteredTool {
         definition: ToolDefinition {
             name:        "web_search".into(),
-            description: "Search the web using Brave Search".into(),
+            description: "Search the web using Brave Search when current external information is needed. Returns result titles, URLs, and descriptions; use web_fetch for a specific URL.".into(),
             parameters:  serde_json::json!({
                 "type": "object",
                 "properties": {
@@ -586,7 +586,7 @@ pub(crate) fn make_web_fetch_tool(summarizer: Option<WebFetchSummarizer>) -> Reg
     RegisteredTool {
         definition: ToolDefinition {
             name: "web_fetch".into(),
-            description: "Fetch content from a URL and optionally summarize it. Pass a prompt to extract specific information instead of returning the full page.".into(),
+            description: "Fetch content from a URL that starts with http:// or https://. Pass a prompt to extract specific information or summarize the page; omit prompt to return the page content.".into(),
             parameters: serde_json::json!({
                 "type": "object",
                 "properties": {
@@ -695,6 +695,57 @@ mod tests {
     use crate::sandbox::*;
     use crate::test_support::MockSandbox;
     use crate::tool_registry::ToolContext;
+
+    #[test]
+    fn core_tool_descriptions_include_actionable_guidance() {
+        let config = SessionOptions::default();
+        let tools = [
+            make_read_file_tool(),
+            make_write_file_tool(),
+            make_edit_file_tool(),
+            make_shell_tool_with_config(&config),
+            make_grep_tool(),
+            make_glob_tool(),
+            make_web_fetch_tool(None),
+        ];
+        let description = |name: &str| {
+            tools
+                .iter()
+                .find(|tool| tool.definition.name == name)
+                .unwrap_or_else(|| panic!("missing tool {name}"))
+                .definition
+                .description
+                .as_str()
+        };
+
+        assert!(description("read_file").contains("Read files before editing"));
+        assert!(description("read_file").contains("offset"));
+        assert!(description("write_file").contains("new files"));
+        assert!(description("write_file").contains("overwrites"));
+        assert!(description("edit_file").contains("exact match"));
+        assert!(description("edit_file").contains("unique"));
+        assert!(description("shell").contains("tests and builds"));
+        assert!(description("shell").contains("timeout_ms"));
+        assert!(description("grep").contains("regex"));
+        assert!(description("grep").contains("glob_filter"));
+        assert!(description("glob").contains("file names"));
+        assert!(description("web_fetch").contains("http:// or https://"));
+        assert!(description("web_fetch").contains("prompt"));
+
+        for tool in tools {
+            let text = &tool.definition.description;
+            assert!(
+                !text.contains("addComment"),
+                "unsupported comment API in {text}"
+            );
+            assert!(
+                !text.contains("background Bash"),
+                "unsupported background Bash guidance in {text}"
+            );
+            assert!(!text.contains("PDF"), "unsupported PDF reads in {text}");
+            assert!(!text.contains("image"), "unsupported image reads in {text}");
+        }
+    }
 
     #[tokio::test]
     async fn read_file_returns_content() {
