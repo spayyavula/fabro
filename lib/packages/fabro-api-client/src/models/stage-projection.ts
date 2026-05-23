@@ -36,6 +36,9 @@ import type { SkillsProjection } from './skills-projection';
 import type { StageCompletion } from './stage-completion';
 // May contain unused imports in some cases
 // @ts-ignore
+import type { StageContextWindowProjection } from './stage-context-window-projection';
+// May contain unused imports in some cases
+// @ts-ignore
 import type { StageModelUsage } from './stage-model-usage';
 // May contain unused imports in some cases
 // @ts-ignore
@@ -97,6 +100,7 @@ export interface StageProjection {
      * MCP servers observed by this stage.
      */
     'mcp_servers'?: Array<McpServerProjection>;
+    'context_window'?: StageContextWindowProjection | null;
     /**
      * Lifecycle state of the stage projection.
      */

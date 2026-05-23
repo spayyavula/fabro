@@ -5,14 +5,24 @@ use fabro_api::types::{
     AgentSkillActivationSource as ApiAgentSkillActivationSource,
     AgentSkillSummary as ApiAgentSkillSummary, McpServerProjection as ApiMcpServerProjection,
     McpServerStatus as ApiMcpServerStatus, PermissionLevel as ApiPermissionLevel,
-    SkillsProjection as ApiSkillsProjection, StageProjection as ApiStageProjection,
-    SubAgentProjection as ApiSubAgentProjection, SubAgentStatus as ApiSubAgentStatus,
-    TodoListProjection as ApiTodoListProjection,
+    SkillsProjection as ApiSkillsProjection, StageContextWindow as ApiStageContextWindow,
+    StageContextWindowBreakdownItem as ApiStageContextWindowBreakdownItem,
+    StageContextWindowCategory as ApiStageContextWindowCategory,
+    StageContextWindowCountMethod as ApiStageContextWindowCountMethod,
+    StageContextWindowProjection as ApiStageContextWindowProjection,
+    StageContextWindowStaleness as ApiStageContextWindowStaleness,
+    StageContextWindowUnavailableReason as ApiStageContextWindowUnavailableReason,
+    StageContextWindowWarning as ApiStageContextWindowWarning,
+    StageProjection as ApiStageProjection, SubAgentProjection as ApiSubAgentProjection,
+    SubAgentStatus as ApiSubAgentStatus, TodoListProjection as ApiTodoListProjection,
 };
 use fabro_types::{
     ActivatedSkill, AgentMcpToolSummary, AgentSkillActivationSource, AgentSkillSummary,
-    McpServerProjection, McpServerStatus, PermissionLevel, SkillsProjection, StageProjection,
-    SubAgentProjection, SubAgentStatus, TodoListKind, TodoListProjection,
+    McpServerProjection, McpServerStatus, PermissionLevel, SkillsProjection, StageContextWindow,
+    StageContextWindowBreakdownItem, StageContextWindowCategory, StageContextWindowCountMethod,
+    StageContextWindowProjection, StageContextWindowStaleness, StageContextWindowUnavailableReason,
+    StageContextWindowWarning, StageProjection, SubAgentProjection, SubAgentStatus, TodoListKind,
+    TodoListProjection,
 };
 use serde_json::json;
 
@@ -34,6 +44,15 @@ fn stage_projection_reuses_nested_agent_state_types() {
     assert_same_type::<ApiMcpServerStatus, McpServerStatus>();
     assert_same_type::<ApiAgentMcpToolSummary, AgentMcpToolSummary>();
     assert_same_type::<ApiPermissionLevel, PermissionLevel>();
+    assert_same_type::<ApiStageContextWindow, StageContextWindow>();
+    assert_same_type::<ApiStageContextWindowProjection, StageContextWindowProjection>();
+    assert_same_type::<ApiStageContextWindowBreakdownItem, StageContextWindowBreakdownItem>();
+    assert_same_type::<ApiStageContextWindowCategory, StageContextWindowCategory>();
+    assert_same_type::<ApiStageContextWindowCountMethod, StageContextWindowCountMethod>();
+    assert_same_type::<ApiStageContextWindowStaleness, StageContextWindowStaleness>();
+    assert_same_type::<ApiStageContextWindowUnavailableReason, StageContextWindowUnavailableReason>(
+    );
+    assert_same_type::<ApiStageContextWindowWarning, StageContextWindowWarning>();
 }
 
 #[test]
@@ -131,11 +150,66 @@ fn stage_projection_round_trips_representative_json() {
                 }
             }
         ],
+        "context_window": {
+            "provider": "openai",
+            "model": "gpt-5.4",
+            "context_window_tokens": 400000,
+            "input_tokens": 123456,
+            "usage_percent": 30.864,
+            "count_method": "provider_api_scaled_breakdown",
+            "staleness": "live",
+            "generated_at": "2026-05-23T12:34:56Z",
+            "event_seq": 42,
+            "breakdown": [
+                {
+                    "category": "system_prompt",
+                    "tokens": 30000,
+                    "usage_percent": 7.5
+                }
+            ],
+            "warnings": []
+        },
         "state": "succeeded"
     });
 
     let state: StageProjection = serde_json::from_value(value.clone()).unwrap();
     assert_eq!(serde_json::to_value(state).unwrap(), value);
+}
+
+#[test]
+fn stage_context_window_response_round_trips_representative_json() {
+    let value = json!({
+        "stage_id": "implement@1",
+        "available": true,
+        "unavailable_reason": null,
+        "provider": "openai",
+        "model": "gpt-5.4",
+        "context_window_tokens": 400000,
+        "input_tokens": 123456,
+        "usage_percent": 30.864,
+        "count_method": "provider_api_scaled_breakdown",
+        "staleness": "live",
+        "generated_at": "2026-05-23T12:34:56Z",
+        "event_seq": 42,
+        "breakdown": [
+            {
+                "category": "system_prompt",
+                "tokens": 30000,
+                "usage_percent": 7.5
+            }
+        ],
+        "warnings": [
+            {
+                "code": "local_token_estimate",
+                "message": "input token count is a local estimate"
+            }
+        ]
+    });
+
+    let response: StageContextWindow = serde_json::from_value(value.clone()).unwrap();
+    let api_response: ApiStageContextWindow = serde_json::from_value(value.clone()).unwrap();
+    assert_eq!(api_response, response);
+    assert_eq!(serde_json::to_value(response).unwrap(), value);
 }
 
 #[test]

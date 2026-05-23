@@ -397,6 +397,14 @@ models/slack-integration-settings.ts
 models/ssh-access-request.ts
 models/ssh-access-response.ts
 models/stage-completion.ts
+models/stage-context-window-breakdown-item.ts
+models/stage-context-window-category.ts
+models/stage-context-window-count-method.ts
+models/stage-context-window-projection.ts
+models/stage-context-window-staleness.ts
+models/stage-context-window-unavailable-reason.ts
+models/stage-context-window-warning.ts
+models/stage-context-window.ts
 models/stage-handler.ts
 models/stage-model-usage.ts
 models/stage-outcome.ts

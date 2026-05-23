@@ -3,7 +3,7 @@ use std::sync::{Arc, Mutex};
 
 use async_trait::async_trait;
 use fabro_agent::subagent::{SessionFactory, SubAgentManager};
-use fabro_agent::tool_registry::{RegisteredTool, ToolContext, ToolRegistry};
+use fabro_agent::tool_registry::{RegisteredTool, ToolContext, ToolRegistry, ToolSource};
 use fabro_agent::{
     AgentEvent, AgentProfile, AnthropicProfile, CompletionCoordinator, GeminiProfile,
     Message as AgentMessage, OpenAiProfile, Sandbox, Session, SessionOptions, StaticEnvProvider,
@@ -238,6 +238,7 @@ fn fabro_run_tool(
                     .map_err(|err| err.to_string())
             })
         }),
+        source:     ToolSource::Native,
     }
 }
 
