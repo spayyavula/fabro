@@ -238,7 +238,7 @@ export function Tooltip({
 // viewport grow rightward from their left edge; triggers in the right half
 // grow leftward from their right edge — keeping the card on-screen without
 // measuring its width.
-function hoverCardStyle(rect: DOMRect): CSSProperties {
+export function hoverCardStyle(rect: DOMRect): CSSProperties {
   const margin = 12;
   const top = rect.bottom + 6;
   if (rect.left > window.innerWidth / 2) {
