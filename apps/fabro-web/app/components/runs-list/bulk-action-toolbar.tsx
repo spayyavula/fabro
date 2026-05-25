@@ -1,15 +1,21 @@
 import { useMemo, useState } from "react";
-import { ArchiveBoxIcon, ArrowUturnLeftIcon, TrashIcon, XMarkIcon } from "@heroicons/react/24/outline";
+import {
+  ArchiveBoxIcon,
+  ArrowUturnLeftIcon,
+  CheckIcon,
+  ChevronUpIcon,
+  EllipsisHorizontalIcon,
+  TrashIcon,
+  XMarkIcon,
+} from "@heroicons/react/24/outline";
+import { Menu, MenuButton, MenuItem, MenuItems } from "@headlessui/react";
 import { useSWRConfig } from "swr";
-import type {
-  BatchDeleteRunsResponse,
-  BatchRunLifecycleResponse,
-  BatchRunLifecycleSummary,
-} from "@qltysh/fabro-api-client";
+import type { BatchRunLifecycleSummary } from "@qltysh/fabro-api-client";
 
 import type { RunWithStatus } from "../../data/runs";
 import { mutateRunListCaches } from "../../lib/board-cache";
 import {
+  approveRuns,
   archiveRuns,
   canArchive,
   canDelete,
@@ -21,7 +27,7 @@ import { plural } from "../settings-panel";
 import { useToast } from "../toast";
 import { ConfirmDialog } from "../ui";
 
-export type BatchLifecycleLabel = "Archive" | "Unarchive" | "Delete";
+export type BatchLifecycleLabel = "Archive" | "Unarchive" | "Delete" | "Approve";
 
 export interface BatchLifecycleToast {
   message: string;
@@ -69,6 +75,10 @@ export function BulkActionToolbar({
     () => selectedRuns.filter((r) => canUnarchive(r.lifecycleStatus)),
     [selectedRuns],
   );
+  const approvable = useMemo(
+    () => selectedRuns.filter((r) => r.pendingApproval === true),
+    [selectedRuns],
+  );
   const deletable = useMemo(
     () => selectedRuns.filter((r) => canDelete(r.lifecycleStatus)),
     [selectedRuns],
@@ -79,7 +89,7 @@ export function BulkActionToolbar({
   async function runBulk(
     label: BatchLifecycleLabel,
     eligible: RunWithStatus[],
-    action: (ids: string[]) => Promise<BatchRunLifecycleResponse | BatchDeleteRunsResponse>,
+    action: (ids: string[]) => Promise<{ summary: BatchRunLifecycleSummary }>,
   ) {
     if (pending) return;
     if (eligible.length === 0) {
@@ -153,12 +163,43 @@ export function BulkActionToolbar({
             disabled={pending}
             onClick={() => runBulk("Unarchive", unarchivable, unarchiveRuns)}
           />
-          <BulkActionButton
-            label="Delete"
-            icon={<TrashIcon className="size-4" aria-hidden="true" />}
-            disabled={pending}
-            onClick={onClickDelete}
-          />
+          <Menu as="div" className="relative">
+            <MenuButton
+              type="button"
+              disabled={pending}
+              aria-label="More actions"
+              className="inline-flex items-center gap-1.5 rounded-full px-3 py-1.5 text-sm text-fg-2 transition-colors enabled:hover:bg-overlay disabled:cursor-default disabled:opacity-40"
+            >
+              <EllipsisHorizontalIcon className="size-4" aria-hidden="true" />
+              <span>More</span>
+              <ChevronUpIcon className="size-3.5 text-fg-3" aria-hidden="true" />
+            </MenuButton>
+            <MenuItems
+              anchor={{ to: "top end", gap: 4 }}
+              className="z-30 min-w-44 origin-bottom-right rounded-md border border-line-strong bg-panel py-1 text-sm shadow-lg shadow-black/40 focus:outline-none"
+            >
+              <MenuItem>
+                <button
+                  type="button"
+                  onClick={() => runBulk("Approve", approvable, approveRuns)}
+                  className="flex w-full items-center gap-2 px-3 py-2 text-left text-fg-2 transition-colors data-focus:bg-overlay data-focus:outline-hidden"
+                >
+                  <CheckIcon className="size-4" aria-hidden="true" />
+                  <span>Approve</span>
+                </button>
+              </MenuItem>
+              <MenuItem>
+                <button
+                  type="button"
+                  onClick={onClickDelete}
+                  className="flex w-full items-center gap-2 px-3 py-2 text-left text-fg-2 transition-colors data-focus:bg-overlay data-focus:outline-hidden"
+                >
+                  <TrashIcon className="size-4" aria-hidden="true" />
+                  <span>Delete</span>
+                </button>
+              </MenuItem>
+            </MenuItems>
+          </Menu>
           <button
             type="button"
             onClick={onClear}
