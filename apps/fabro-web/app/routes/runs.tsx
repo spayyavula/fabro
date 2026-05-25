@@ -73,7 +73,6 @@ export {
   RUNS_PREFERENCES_STORAGE_KEY,
 } from "../components/runs-list/preferences";
 export { summarizeBatchLifecycleAction } from "../components/runs-list/bulk-action-toolbar";
-export { RUNS_LIST_GRID_TEMPLATE, RunRow } from "../components/runs-list/run-table-row";
 
 export function meta({}: any) {
   return [{ title: "Runs — Fabro" }];

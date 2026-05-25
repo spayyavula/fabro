@@ -9,8 +9,6 @@ import { RowActionsMenu } from "./row-actions-menu";
 import { SelectionCheckbox } from "./selection-checkbox";
 import type { ToggleableColumn } from "./toggleable-column";
 
-export const RUNS_LIST_GRID_TEMPLATE = "auto 5rem auto 1fr auto auto 8rem auto";
-
 function listLifecycleStatusLabel(
   run: Pick<RunWithStatus, "status" | "statusLabel" | "lifecycleStatusLabel">,
 ): string | null {
@@ -19,67 +17,6 @@ function listLifecycleStatusLabel(
   }
   if (run.status === "initializing") return null;
   return run.lifecycleStatusLabel;
-}
-
-export function RunRow({ run }: { run: RunWithStatus }) {
-  const lifecycleLabel = listLifecycleStatusLabel(run);
-  const statusDisplay = columnStatusDisplay[run.status];
-
-  return (
-    <div className="grid items-center rounded-md border border-line bg-panel/80 px-4 py-3 transition-all duration-200 hover:border-line-strong hover:bg-panel" style={{ gridColumn: "1 / -1", gridTemplateColumns: "subgrid" }}>
-      <Link to={`/runs/${run.id}`} className="contents">
-      <span className="flex items-center gap-2 pr-2">
-        <span className={`size-1.5 shrink-0 rounded-full ${statusDisplay.dot}`} aria-hidden="true" />
-        <span className={`font-mono text-xs ${statusDisplay.text}`}>{run.statusLabel}</span>
-      </span>
-
-      <span className="font-mono text-xs pr-2 text-fg-muted">
-        {run.elapsed}
-      </span>
-
-      <span className="truncate font-mono text-xs font-medium text-teal-500 pr-2">{run.repo}</span>
-
-      <span className="flex items-center gap-2 min-w-0">
-        <InlineMarkdown content={run.title} className="truncate text-sm text-fg-2" />
-        {lifecycleLabel != null && (
-          <span className="rounded-full border border-line px-1.5 py-0.5 font-mono text-[11px] uppercase tracking-wide text-fg-muted">
-            {lifecycleLabel}
-          </span>
-        )}
-        {run.comments != null && run.comments > 0 && (
-          <span className="inline-flex shrink-0 items-center gap-1 font-mono text-xs text-fg-muted">
-            <svg viewBox="0 0 16 16" fill="currentColor" className="size-3" aria-hidden="true">
-              <path d="M1 2.75C1 1.784 1.784 1 2.75 1h10.5c.966 0 1.75.784 1.75 1.75v7.5A1.75 1.75 0 0 1 13.25 12H9.06l-2.573 2.573A1.458 1.458 0 0 1 4 13.543V12H2.75A1.75 1.75 0 0 1 1 10.25Zm1.75-.25a.25.25 0 0 0-.25.25v7.5c0 .138.112.25.25.25h2a.75.75 0 0 1 .75.75v2.19l2.72-2.72a.749.749 0 0 1 .53-.22h4.5a.25.25 0 0 0 .25-.25v-7.5a.25.25 0 0 0-.25-.25Z" />
-            </svg>
-            {run.comments}
-          </span>
-        )}
-      </span>
-
-      <span className="truncate font-mono text-xs text-fg-3 pr-2">{run.workflow}</span>
-
-      <span
-        className="font-mono text-xs text-fg-muted pr-2"
-        title={run.createdAt}
-      >
-        {run.createdAt != null ? formatRelativeTime(run.createdAt) : ""}
-      </span>
-
-      <span className="flex items-center justify-end gap-2 pr-4 font-mono text-xs tabular-nums">
-        {run.additions != null && <span className="text-mint">+{run.additions.toLocaleString()}</span>}
-        {run.deletions != null && <span className="text-coral">-{run.deletions.toLocaleString()}</span>}
-      </span>
-      </Link>
-
-      <span className="inline-flex items-center justify-end gap-1.5 font-mono text-xs text-fg-muted">
-        {run.pullRequestUrl && run.number != null && (
-          <PullRequestChip number={run.number} url={run.pullRequestUrl}>
-            {run.checks != null && <span className={`size-1.5 rounded-full ${ciConfig[deriveCiStatus(run.checks)].dot}`} />}
-          </PullRequestChip>
-        )}
-      </span>
-    </div>
-  );
 }
 
 export function RunTableRow({
