@@ -247,6 +247,139 @@ export function persistRunsWorkspacePreferences(
   }
 }
 
+const CHILD_RUNS_LIST_PREFERENCES_VERSION = 1;
+export const CHILD_RUNS_LIST_PREFERENCES_STORAGE_KEY = "fabro:run-children-preferences:v1";
+const CHILD_RUNS_LIST_PARAM_KEYS = [
+  "search",
+  "created",
+  "archived",
+  "sort",
+  "direction",
+  "size",
+  "hide",
+] as const;
+
+export interface ChildRunsListPreferences {
+  version: typeof CHILD_RUNS_LIST_PREFERENCES_VERSION;
+  search: string;
+  created: CreatedFilter;
+  archived: boolean;
+  sort: ListRunsSortEnum;
+  direction: ListRunsDirectionEnum;
+  size: number;
+  hide: string;
+  // URL-only: never persisted to localStorage.
+  page: number;
+}
+
+export function defaultChildRunsListPreferences(): ChildRunsListPreferences {
+  return {
+    version:   CHILD_RUNS_LIST_PREFERENCES_VERSION,
+    search:    "",
+    created:   "all",
+    archived:  false,
+    sort:      "created_at",
+    direction: "desc",
+    size:      DEFAULT_LIST_PAGE_SIZE,
+    hide:      "",
+    page:      1,
+  };
+}
+
+function normalizeStoredChildRunsListPreferences(value: unknown): ChildRunsListPreferences {
+  const record = storageRecord(value);
+  if (record == null || record.version !== CHILD_RUNS_LIST_PREFERENCES_VERSION) {
+    return defaultChildRunsListPreferences();
+  }
+
+  const hiddenColumns = parseHiddenColumns(stringValue(record.hide));
+  const size = record.size;
+
+  return {
+    version:   CHILD_RUNS_LIST_PREFERENCES_VERSION,
+    search:    stringValue(record.search) ?? "",
+    created:   parseCreatedFilter(stringValue(record.created)),
+    archived:  record.archived === true || record.archived === "1",
+    sort:      parseSort(stringValue(record.sort)),
+    direction: parseDirection(stringValue(record.direction)),
+    size:      parsePageSize(typeof size === "number" || typeof size === "string" ? String(size) : null),
+    hide:      serializeHiddenColumns(hiddenColumns) ?? "",
+    page:      1,
+  };
+}
+
+export function childRunsListPreferencesFromSearchParams(
+  searchParams: URLSearchParams,
+): ChildRunsListPreferences {
+  return {
+    version:   CHILD_RUNS_LIST_PREFERENCES_VERSION,
+    search:    searchParams.get("search") ?? "",
+    created:   parseCreatedFilter(searchParams.get("created")),
+    archived:  searchParams.get("archived") === "1",
+    sort:      parseSort(searchParams.get("sort")),
+    direction: parseDirection(searchParams.get("direction")),
+    size:      parsePageSize(searchParams.get("size")),
+    hide:      serializeHiddenColumns(parseHiddenColumns(searchParams.get("hide"))) ?? "",
+    page:      parsePage(searchParams.get("page")),
+  };
+}
+
+export function childRunsListPreferencesToSearchParams(
+  preferences: ChildRunsListPreferences,
+): URLSearchParams {
+  const params = new URLSearchParams();
+  if (preferences.search !== "") params.set("search", preferences.search);
+  if (preferences.created !== "all") params.set("created", preferences.created);
+  if (preferences.archived) params.set("archived", "1");
+  if (preferences.sort !== "created_at") params.set("sort", preferences.sort);
+  if (preferences.direction === "asc") params.set("direction", "asc");
+  if (preferences.size !== DEFAULT_LIST_PAGE_SIZE) params.set("size", String(preferences.size));
+  if (preferences.hide !== "") params.set("hide", preferences.hide);
+  if (preferences.page > 1) params.set("page", String(preferences.page));
+  return params;
+}
+
+function hasChildRunsListParams(searchParams: URLSearchParams): boolean {
+  return CHILD_RUNS_LIST_PARAM_KEYS.some((key) => searchParams.has(key));
+}
+
+export function loadStoredChildRunsListSearchParams(
+  storage: Pick<Storage, "getItem"> | null = runsPreferencesStorage(),
+): URLSearchParams {
+  if (storage == null) return new URLSearchParams();
+  try {
+    const raw = storage.getItem(CHILD_RUNS_LIST_PREFERENCES_STORAGE_KEY);
+    if (raw == null) return new URLSearchParams();
+    return childRunsListPreferencesToSearchParams(
+      normalizeStoredChildRunsListPreferences(JSON.parse(raw)),
+    );
+  } catch {
+    return new URLSearchParams();
+  }
+}
+
+export function resolveChildRunsListSearchParams(
+  urlSearchParams: URLSearchParams,
+): URLSearchParams {
+  if (hasChildRunsListParams(urlSearchParams)) return urlSearchParams;
+  const stored = loadStoredChildRunsListSearchParams();
+  return stored.toString() === "" ? urlSearchParams : stored;
+}
+
+export function persistChildRunsListPreferences(
+  preferences: ChildRunsListPreferences,
+  storage: Pick<Storage, "setItem"> | null = runsPreferencesStorage(),
+) {
+  if (storage == null) return;
+  // `page` is URL-only ephemeral view state; strip it before persisting.
+  const { page: _page, ...storable } = preferences;
+  try {
+    storage.setItem(CHILD_RUNS_LIST_PREFERENCES_STORAGE_KEY, JSON.stringify(storable));
+  } catch {
+    // localStorage persistence is best effort only.
+  }
+}
+
 export function createdCutoffMsFor(filter: CreatedFilter): number | null {
   const now = Date.now();
   switch (filter) {

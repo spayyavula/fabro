@@ -86,7 +86,7 @@ export function useRetryRun(id: string | undefined) {
   return useLifecycleMutation(id, "retry", retryRun, (run, mutate) => {
     void mutate(queryKeys.runs.detail(run.id), run, { revalidate: false });
     if (run.parent_id) {
-      void mutate(queryKeys.runs.children(run.parent_id));
+      mutateRunListCaches(mutate);
     }
   });
 }

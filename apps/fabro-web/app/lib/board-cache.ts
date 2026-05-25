@@ -5,7 +5,7 @@ type Mutator = (key: KeyOrMatcher) => unknown;
 const isRunListKey: KeyMatcher = (key) =>
   Array.isArray(key) &&
   key[0] === "runs" &&
-  (key[1] === "all" || key[1] === "page" || key[1] === "children");
+  (key[1] === "all" || key[1] === "page");
 
 export function runListCacheMatchers(): KeyOrMatcher[] {
   return [isRunListKey];
