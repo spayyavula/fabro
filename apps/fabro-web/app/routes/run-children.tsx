@@ -228,12 +228,12 @@ export default function RunChildren() {
             description="When you launch another run with this run as its parent, it will appear here."
             action={
               <a
-                href="https://docs.fabro.sh/reference/cli#fabro-parent-link"
+                href="https://docs.fabro.sh/execution/child-runs"
                 target="_blank"
                 rel="noopener noreferrer"
                 className={SECONDARY_BUTTON_CLASS}
               >
-                Learn about parent links
+                Learn about child runs
               </a>
             }
           />
