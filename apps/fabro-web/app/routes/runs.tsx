@@ -721,6 +721,7 @@ export default function Runs() {
     repoFilter,
     workflowFilter,
     createdFilter,
+    statusFilter,
     includeArchived,
     view,
     sort,
@@ -732,6 +733,7 @@ export default function Runs() {
     setRepoFilter,
     setWorkflowFilter,
     setCreatedFilter,
+    setStatusFilter,
     setIncludeArchived,
     setView,
     setPage,
@@ -827,7 +829,13 @@ export default function Runs() {
     (sum, col) => sum + col.items.length,
     0,
   );
-  const visibleColumns = placeArchivedColumnLast(filteredColumns, includeArchived).filter(
+  // Empty status filter means "show all"; otherwise only render the lanes
+  // whose status the user explicitly selected.
+  const statusVisibleColumns =
+    statusFilter.size === 0
+      ? filteredColumns
+      : filteredColumns.filter((col) => statusFilter.has(col.id));
+  const visibleColumns = placeArchivedColumnLast(statusVisibleColumns, includeArchived).filter(
     (col) => col.id !== "pending" || col.items.length > 0,
   );
 
@@ -839,6 +847,7 @@ export default function Runs() {
           repoFilter={repoFilter}
           workflowFilter={workflowFilter}
           createdFilter={createdFilter}
+          statusFilter={statusFilter}
           includeArchived={includeArchived}
           view={view}
           hiddenColumns={hiddenColumns}
@@ -848,6 +857,7 @@ export default function Runs() {
           onRepoFilterChange={setRepoFilter}
           onWorkflowFilterChange={setWorkflowFilter}
           onCreatedFilterChange={setCreatedFilter}
+          onStatusFilterChange={setStatusFilter}
           onIncludeArchivedChange={setIncludeArchived}
           onViewChange={setView}
           onHiddenColumnsChange={setHiddenColumns}
@@ -894,6 +904,7 @@ export default function Runs() {
             query={lowerQuery}
             repoFilter={repoFilter}
             workflowFilter={workflowFilter}
+            statusFilter={statusFilter}
             createdCutoffMs={createdCutoffMs}
           />
         )}

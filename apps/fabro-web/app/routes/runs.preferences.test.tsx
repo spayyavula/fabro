@@ -284,6 +284,9 @@ describe("Runs workspace preference restoration", () => {
       compositeByName(renderer, "FilterButton", (props) => props.label === "Time").props.onChange("7d");
     });
     await act(async () => {
+      compositeByName(renderer, "StatusFilterButton").props.onChange(new Set(["running", "blocked"]));
+    });
+    await act(async () => {
       renderer.root.findByProps({ title: "Show archived runs" }).props.onClick();
     });
     await act(async () => {
@@ -296,6 +299,7 @@ describe("Runs workspace preference restoration", () => {
       repo:     "qlty/docs",
       workflow: "docs",
       created:  "7d",
+      status:   "running,blocked",
       archived: true,
       hide:     "repo,workflow",
     });
