@@ -57,6 +57,7 @@ pub(crate) struct RequestAuth(pub(crate) AuthContextSlot);
 
 pub(crate) struct RequiredUser(pub(crate) UserPrincipal);
 pub(crate) struct RequiredRunManagementActor(pub(crate) Principal);
+pub(crate) struct RequiredRunToolActor(pub(crate) Principal);
 pub(crate) struct RequireRunScoped(pub(crate) RunId);
 pub(crate) struct RequireWorkerRunScoped(pub(crate) RunId);
 pub(crate) struct RequireRunManagementTarget(pub(crate) RunId, pub(crate) Principal);
@@ -217,6 +218,19 @@ impl<S: Send + Sync> FromRequestParts<S> for RequiredUser {
 }
 
 impl<S: Send + Sync> FromRequestParts<S> for RequiredRunManagementActor {
+    type Rejection = ApiError;
+
+    async fn from_request_parts(parts: &mut Parts, _: &S) -> Result<Self, Self::Rejection> {
+        let slot = parts
+            .extensions
+            .get::<AuthContextSlot>()
+            .cloned()
+            .unwrap_or_else(AuthContextSlot::initial);
+        require_run_management_actor(&slot).map(Self)
+    }
+}
+
+impl<S: Send + Sync> FromRequestParts<S> for RequiredRunToolActor {
     type Rejection = ApiError;
 
     async fn from_request_parts(parts: &mut Parts, _: &S) -> Result<Self, Self::Rejection> {
