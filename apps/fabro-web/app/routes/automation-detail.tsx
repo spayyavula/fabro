@@ -346,7 +346,7 @@ function AutomationRunsList({ automationId }: { automationId: string }) {
             placeholder="Search runs…"
             value={query}
             onChange={(e) => setQuery(e.target.value)}
-            className="w-full rounded-md border border-line bg-panel/80 py-2 pl-9 pr-3 text-sm text-fg-2 placeholder-fg-muted outline-none transition-colors focus:border-focus focus:ring-0"
+            className="w-full rounded-md border border-line bg-panel/80 py-1.5 pl-9 pr-3 text-sm text-fg-2 placeholder-fg-muted outline-none transition-colors focus:border-focus focus:ring-0"
           />
         </div>
 
