@@ -6,18 +6,11 @@
 //! Loads that fail drop the part silently — the long-standing contract — and
 //! non-file URLs and already-inline data pass through untouched.
 //!
-//! Shared infra introduced ahead of its consumers: the per-dialect codecs
-//! (anthropic/openai_responses/gemini) each construct their own
-//! [`AttachmentPolicy`] and call [`resolve`] from their adapter shells when
-//! they are wired. Until the first of those lands, nothing here is reachable.
+//! Shared infra for the per-dialect codecs (anthropic/openai_responses/gemini):
+//! each constructs its own [`AttachmentPolicy`] and calls [`resolve`] from its
+//! adapter shell.
 
-// Each dialect adapter that wires this in removes the allow as part of its
-// rewire; harmless if it lingers when several land in parallel.
-#![allow(
-    dead_code,
-    reason = "Attachment-resolution infra added ahead of the dialect codecs (PRs 3-5) that \
-              construct an AttachmentPolicy and call resolve from their adapter shells."
-)]
+use std::borrow::Cow;
 
 use crate::providers::common;
 use crate::types::{AudioData, ContentPart, DocumentData, ImageData, Request};
@@ -32,9 +25,15 @@ pub(crate) struct AttachmentPolicy {
     pub audio:     bool,
 }
 
-/// Return a copy of `request` with file-path attachments (per `policy`)
-/// resolved to inline data. Parts whose file fails to load are dropped.
-pub(crate) async fn resolve(request: &Request, policy: AttachmentPolicy) -> Request {
+/// Resolve file-path attachments (per `policy`) to inline data. Parts whose
+/// file fails to load are dropped. Borrows the request untouched in the common
+/// case where nothing needs loading; only requests with policy-matching
+/// local-file parts pay for a copy.
+pub(crate) async fn resolve(request: &Request, policy: AttachmentPolicy) -> Cow<'_, Request> {
+    if !needs_resolution(request, policy) {
+        return Cow::Borrowed(request);
+    }
+
     let mut resolved = request.clone();
     for message in &mut resolved.messages {
         let mut new_content = Vec::with_capacity(message.content.len());
@@ -45,7 +44,21 @@ pub(crate) async fn resolve(request: &Request, policy: AttachmentPolicy) -> Requ
         }
         message.content = new_content;
     }
-    resolved
+    Cow::Owned(resolved)
+}
+
+/// Whether any part is a policy-matching local-file attachment.
+fn needs_resolution(request: &Request, policy: AttachmentPolicy) -> bool {
+    request
+        .messages
+        .iter()
+        .flat_map(|message| &message.content)
+        .any(|part| match part {
+            ContentPart::Image(img) => policy.images && is_local_file(img.url.as_deref()),
+            ContentPart::Document(doc) => policy.documents && is_local_file(doc.url.as_deref()),
+            ContentPart::Audio(audio) => policy.audio && is_local_file(audio.url.as_deref()),
+            _ => false,
+        })
 }
 
 /// Resolve a single part. `None` means the part was dropped (load error).
