@@ -123,6 +123,8 @@ pub struct SettingsModelFeatures {
     pub reasoning_effort: Option<ReasoningEffortFeature>,
     #[serde(default)]
     pub prompt_cache:     Option<bool>,
+    #[serde(default)]
+    pub sampling_params:  Option<bool>,
 }
 
 #[derive(Debug, Clone, Default, PartialEq, Deserialize)]
@@ -599,7 +601,7 @@ pub enum CatalogBuildError {
     #[error("model '{model}' declares reasoning_effort feature but features.reasoning is false")]
     ReasoningEffortWithoutReasoning { model: String },
     #[error(
-        "model '{model}' must declare at least one reasoning_effort when features.reasoning_effort is levels"
+        "model '{model}' must declare at least one reasoning_effort when features.reasoning_effort is levels or always_adaptive"
     )]
     EmptyReasoningEffortControls { model: String },
     #[error("model '{model}' has invalid speed '{value}'")]
@@ -1189,6 +1191,7 @@ fn merge_model_features_settings(
         reasoning:        higher.reasoning.or(fallback.reasoning),
         reasoning_effort: higher.reasoning_effort.or(fallback.reasoning_effort),
         prompt_cache:     higher.prompt_cache.or(fallback.prompt_cache),
+        sampling_params:  higher.sampling_params.or(fallback.sampling_params),
     }
 }
 
@@ -1427,7 +1430,7 @@ fn build_model_features(
             field: "features.reasoning",
         })?;
     let reasoning_effort = features.reasoning_effort.unwrap_or_default();
-    if !reasoning && reasoning_effort == ReasoningEffortFeature::Levels {
+    if !reasoning && reasoning_effort != ReasoningEffortFeature::None {
         return Err(CatalogBuildError::ReasoningEffortWithoutReasoning {
             model: model_id.to_string(),
         });
@@ -1449,6 +1452,7 @@ fn build_model_features(
         reasoning,
         reasoning_effort,
         prompt_cache: features.prompt_cache.unwrap_or_default(),
+        sampling_params: features.sampling_params.unwrap_or(true),
     })
 }
 
@@ -1496,8 +1500,7 @@ fn build_model_controls(
     features: &ModelFeatures,
     settings: &ModelCatalogSettings,
 ) -> Result<CatalogModelControls, CatalogBuildError> {
-    let supports_native_reasoning_effort =
-        features.reasoning_effort == ReasoningEffortFeature::Levels;
+    let supports_native_reasoning_effort = features.supports_reasoning_effort();
     let reasoning_effort = match settings
         .controls
         .as_ref()
@@ -3449,6 +3452,52 @@ reasoning_effort = ["low", "medium"]
     }
 
     #[test]
+    fn catalog_from_settings_accepts_reasoning_effort_feature_always_adaptive() {
+        let settings = minimal_settings(
+            r#"
+[providers.test]
+display_name = "Test"
+adapter = "openai"
+agent_profile = "openai"
+
+[models.model]
+provider = "test"
+display_name = "Model"
+family = "test"
+default = true
+
+[models.model.limits]
+context_window = 1000
+
+[models.model.features]
+tools = true
+vision = false
+reasoning = true
+reasoning_effort = "always_adaptive"
+prompt_cache = true
+"#,
+        );
+
+        let catalog = Catalog::from_settings(&settings).unwrap();
+        let model = catalog.get("model").unwrap();
+        assert_eq!(
+            model.features.reasoning_effort,
+            crate::ReasoningEffortFeature::AlwaysAdaptive
+        );
+        assert!(model.supports_reasoning_effort());
+        // Always-adaptive models get the full default effort controls, same as
+        // Levels.
+        assert_eq!(
+            catalog
+                .model_settings("model")
+                .unwrap()
+                .controls
+                .reasoning_effort,
+            ReasoningEffort::VARIANTS.to_vec()
+        );
+    }
+
+    #[test]
     fn catalog_from_settings_accepts_reasoning_effort_controls_without_native_effort_feature() {
         let settings = minimal_settings(
             r#"
@@ -3560,6 +3609,89 @@ reasoning_effort = "levels"
         ));
     }
 
+    #[test]
+    fn catalog_from_settings_rejects_always_adaptive_effort_without_reasoning() {
+        let settings = minimal_settings(
+            r#"
+[providers.test]
+display_name = "Test"
+adapter = "openai"
+agent_profile = "openai"
+
+[models.model]
+provider = "test"
+display_name = "Model"
+family = "test"
+default = true
+
+[models.model.limits]
+context_window = 1000
+
+[models.model.features]
+tools = true
+vision = false
+reasoning = false
+reasoning_effort = "always_adaptive"
+"#,
+        );
+
+        assert!(matches!(
+            Catalog::from_settings(&settings).unwrap_err(),
+            CatalogBuildError::ReasoningEffortWithoutReasoning { model }
+                if model == "model"
+        ));
+    }
+
+    #[test]
+    fn catalog_from_settings_sampling_params_defaults_true_and_accepts_false() {
+        let settings = minimal_settings(
+            r#"
+[providers.test]
+display_name = "Test"
+adapter = "openai"
+agent_profile = "openai"
+
+[models.with-sampling]
+provider = "test"
+display_name = "With"
+family = "test"
+default = true
+
+[models.with-sampling.limits]
+context_window = 1000
+
+[models.with-sampling.features]
+tools = true
+vision = false
+reasoning = false
+
+[models.no-sampling]
+provider = "test"
+display_name = "Without"
+family = "test"
+
+[models.no-sampling.limits]
+context_window = 1000
+
+[models.no-sampling.features]
+tools = true
+vision = false
+reasoning = false
+sampling_params = false
+"#,
+        );
+
+        let catalog = Catalog::from_settings(&settings).unwrap();
+        assert!(
+            catalog
+                .get("with-sampling")
+                .unwrap()
+                .features
+                .sampling_params
+        );
+        assert!(!catalog.get("no-sampling").unwrap().features.sampling_params);
+    }
+
     // ---- Provider / catalog data integrity tests ----
 
     #[test]
@@ -3637,6 +3769,7 @@ reasoning_effort = "levels"
                 reasoning: true,
                 reasoning_effort: Levels,
                 prompt_cache: true,
+                sampling_params: true,
             },
             costs: ModelCosts {
                 input_cost_per_mtok: Some(
@@ -3692,6 +3825,7 @@ reasoning_effort = "levels"
                 reasoning: false,
                 reasoning_effort: None,
                 prompt_cache: false,
+                sampling_params: true,
             },
             costs: ModelCosts {
                 input_cost_per_mtok: Some(
@@ -3755,6 +3889,7 @@ reasoning_effort = "levels"
                 reasoning: true,
                 reasoning_effort: Levels,
                 prompt_cache: false,
+                sampling_params: true,
             },
             costs: ModelCosts {
                 input_cost_per_mtok: Some(
@@ -3810,6 +3945,7 @@ reasoning_effort = "levels"
                 reasoning: true,
                 reasoning_effort: Levels,
                 prompt_cache: false,
+                sampling_params: true,
             },
             costs: ModelCosts {
                 input_cost_per_mtok: Some(

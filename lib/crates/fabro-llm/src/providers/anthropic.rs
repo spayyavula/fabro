@@ -2,11 +2,11 @@ use std::sync::Arc;
 
 use base64::Engine;
 use base64::engine::general_purpose::STANDARD as BASE64_STANDARD;
-use fabro_model::{Catalog, ReasoningEffortFeature};
+use fabro_model::{Catalog, Model, ReasoningEffortFeature};
 use futures::stream;
 
 use crate::error::{Error, ProviderErrorDetail, ProviderErrorKind, error_from_status_code};
-use crate::provider::{ProviderAdapter, StreamEventStream};
+use crate::provider::{ProviderAdapter, StreamEventStream, validate_tool_choice};
 use crate::providers::common::{
     self as common, extract_system_prompt, parse_error_body, parse_rate_limit_headers,
     parse_retry_after, send_and_read_response,
@@ -205,11 +205,13 @@ impl CacheControl {
 
 #[derive(serde::Deserialize)]
 struct ApiResponse {
-    id:          String,
-    model:       String,
-    content:     Vec<serde_json::Value>,
-    stop_reason: Option<String>,
-    usage:       ApiUsage,
+    id:           String,
+    model:        String,
+    content:      Vec<serde_json::Value>,
+    stop_reason:  Option<String>,
+    #[serde(default)]
+    stop_details: Option<serde_json::Value>,
+    usage:        ApiUsage,
 }
 
 #[derive(serde::Deserialize)]
@@ -625,6 +627,14 @@ fn is_auto_cache_enabled(provider_options: Option<&serde_json::Value>) -> bool {
         .unwrap_or(true)
 }
 
+fn anthropic_thinking_type(provider_options: Option<&serde_json::Value>) -> Option<&str> {
+    provider_options
+        .and_then(|opts| opts.get("anthropic"))
+        .and_then(|anthropic| anthropic.get("thinking"))
+        .and_then(|thinking| thinking.get("type"))
+        .and_then(serde_json::Value::as_str)
+}
+
 /// Wrap a system prompt string as an array of content blocks with
 /// `cache_control` on the last block.
 fn system_with_cache_control(system: &str) -> serde_json::Value {
@@ -674,13 +684,10 @@ fn apply_cache_control_to_conversation_prefix(messages: &mut [ApiMessage]) {
 
 /// Collect beta headers from `provider_options` and merge with the caching
 /// header when auto-caching is active.
-const CONTEXT_1M_BETA_HEADER: &str = "context-1m-2025-08-07";
-
 fn build_beta_header(
     provider_options: Option<&serde_json::Value>,
     include_cache_header: bool,
     include_fast_mode_header: bool,
-    include_1m_context: bool,
 ) -> Option<String> {
     let mut headers: Vec<String> = Vec::new();
 
@@ -706,11 +713,6 @@ fn build_beta_header(
     // Add fast-mode header if speed=fast and not already present
     if include_fast_mode_header && !headers.iter().any(|h| h == FAST_MODE_BETA_HEADER) {
         headers.push(FAST_MODE_BETA_HEADER.to_string());
-    }
-
-    // Add 1M context header for models with >= 1M context window
-    if include_1m_context && !headers.iter().any(|h| h == CONTEXT_1M_BETA_HEADER) {
-        headers.push(CONTEXT_1M_BETA_HEADER.to_string());
     }
 
     if headers.is_empty() {
@@ -1043,8 +1045,64 @@ fn process_sse_event_for_provider(
 ) -> Result<Vec<StreamEvent>, Error> {
     if event_type == "error" {
         Err(stream_error_event_to_provider_error(data, provider_name))
+    } else if event_type == "message_delta"
+        && data
+            .get("delta")
+            .and_then(|delta| delta.get("stop_reason"))
+            .and_then(serde_json::Value::as_str)
+            == Some("refusal")
+    {
+        let stop_details = data
+            .get("delta")
+            .and_then(|delta| delta.get("stop_details"));
+        Err(refusal_error(
+            provider_name,
+            &acc.model,
+            refusal_stream_raw(data),
+            stop_details,
+        ))
     } else {
         Ok(process_sse_event(event_type, data, acc))
+    }
+}
+
+fn refusal_stream_raw(data: &serde_json::Value) -> serde_json::Value {
+    serde_json::json!({
+        "stop_reason": "refusal",
+        "stop_details": data
+            .get("delta")
+            .and_then(|delta| delta.get("stop_details"))
+            .cloned()
+            .unwrap_or(serde_json::Value::Null),
+        "stream_event": data,
+    })
+}
+
+fn refusal_error(
+    provider_name: &str,
+    model: &str,
+    raw: serde_json::Value,
+    stop_details: Option<&serde_json::Value>,
+) -> Error {
+    let model_label = if model.is_empty() { "The model" } else { model };
+    let message = stop_details
+        .and_then(|details| details.get("explanation"))
+        .and_then(serde_json::Value::as_str)
+        .map_or_else(
+            || format!("{model_label} refused the request"),
+            |explanation| format!("{model_label} refused the request: {explanation}"),
+        );
+
+    Error::Provider {
+        kind:   ProviderErrorKind::ContentFilter,
+        detail: Box::new(ProviderErrorDetail {
+            message,
+            provider: provider_name.to_string(),
+            status_code: None,
+            error_code: Some("refusal".to_string()),
+            retry_after: None,
+            raw: Some(raw),
+        }),
     }
 }
 
@@ -1223,6 +1281,7 @@ async fn build_api_request(
     };
 
     let model_info = common::catalog_model(adapter.catalog.as_deref(), &request.model);
+    let api_model = common::api_model_id(adapter.catalog.as_deref(), &request.model);
     let supports_prompt_cache = model_info.is_some_and(|m| m.features.prompt_cache);
     let auto_cache =
         supports_prompt_cache && is_auto_cache_enabled(request.provider_options.as_ref());
@@ -1258,18 +1317,30 @@ async fn build_api_request(
     // Check whether this model supports the `output_config.effort` parameter.
     // Older reasoning models (e.g. claude-sonnet-4-5) need `thinking` with
     // `budget_tokens` instead.
-    let supports_effort =
-        model_info.is_none_or(|m| m.features.reasoning_effort == ReasoningEffortFeature::Levels);
+    let supports_effort = model_info.is_none_or(Model::supports_reasoning_effort);
 
     let mut resolved_max_tokens = request
         .max_tokens
         .or_else(|| model_info.and_then(|m| m.limits.max_output))
         .unwrap_or(65536);
 
+    // Default thinking when none is configured explicitly: adaptive for
+    // `levels` models, with or without an effort level — effort is guidance
+    // for thinking allocation, not a replacement for it. Natively adaptive
+    // models don't need one injected (and reject a manual on/off toggle).
+    let default_thinking = || {
+        if model_info.is_some_and(|m| m.features.reasoning_effort == ReasoningEffortFeature::Levels)
+        {
+            Some(serde_json::json!({"type": "adaptive"}))
+        } else {
+            None
+        }
+    };
+
     let (mut thinking, mut output_config) = if let Some(effort) = &request.reasoning_effort {
         if supports_effort {
             (
-                explicit_thinking,
+                explicit_thinking.or_else(default_thinking),
                 Some(serde_json::json!({"effort": <&'static str>::from(*effort)})),
             )
         } else if explicit_thinking.is_none() {
@@ -1288,18 +1359,7 @@ async fn build_api_request(
             (explicit_thinking, None)
         }
     } else {
-        // Auto-set adaptive thinking for known effort-capable models when no
-        // explicit thinking config or reasoning_effort is provided.
-        let thinking = explicit_thinking.or_else(|| {
-            if model_info
-                .is_some_and(|m| m.features.reasoning_effort == ReasoningEffortFeature::Levels)
-            {
-                Some(serde_json::json!({"type": "adaptive"}))
-            } else {
-                None
-            }
-        });
-        (thinking, None)
+        (explicit_thinking.or_else(default_thinking), None)
     };
 
     if tool_choice_forces_tool_use(tool_choice_json.as_ref()) {
@@ -1308,14 +1368,23 @@ async fn build_api_request(
     }
 
     let is_fast = request.speed == Some(Speed::Fast);
+    // Models with `sampling_params = false` reject classic sampling knobs.
+    // This gate covers only the typed request fields; values injected through
+    // `provider_options.anthropic` (e.g. `top_k`) are a raw escape hatch and
+    // pass through unfiltered.
+    let (temperature, top_p) = if model_info.is_none_or(Model::supports_sampling_params) {
+        (request.temperature, request.top_p)
+    } else {
+        (None, None)
+    };
 
     let api_request = ApiRequest {
-        model: common::api_model_id(adapter.catalog.as_deref(), &request.model),
+        model: api_model,
         messages: api_messages,
         max_tokens: resolved_max_tokens,
         system: system_value,
-        temperature: request.temperature,
-        top_p: request.top_p,
+        temperature,
+        top_p,
         stop_sequences: Some(request.stop_sequences.clone().unwrap_or_default()),
         tools: api_tools,
         tool_choice: tool_choice_json,
@@ -1343,13 +1412,9 @@ async fn build_api_request(
         }
         req_builder = req_builder.header("anthropic-version", "2023-06-01");
 
-        let include_1m_context = model_info.is_some_and(|m| m.context_window() >= 1_000_000);
-        if let Some(beta_str) = build_beta_header(
-            request.provider_options.as_ref(),
-            auto_cache,
-            is_fast,
-            include_1m_context,
-        ) {
+        if let Some(beta_str) =
+            build_beta_header(request.provider_options.as_ref(), auto_cache, is_fast)
+        {
             req_builder = req_builder.header("anthropic-beta", beta_str);
         }
     } else if let Some(api_key) = &adapter.http.api_key {
@@ -1386,7 +1451,6 @@ impl ProviderAdapter for Adapter {
         let auto_cache =
             supports_prompt_cache && is_auto_cache_enabled(request.provider_options.as_ref());
         let is_fast = request.speed == Some(Speed::Fast);
-        let include_1m_context = model_info.is_some_and(|m| m.context_window() >= 1_000_000);
 
         let url = self.count_tokens_url();
         let mut req = self.http.client.post(&url);
@@ -1397,12 +1461,9 @@ impl ProviderAdapter for Adapter {
             req = req.header("x-api-key", api_key);
         }
         req = req.header("anthropic-version", "2023-06-01");
-        if let Some(beta_str) = build_beta_header(
-            request.provider_options.as_ref(),
-            auto_cache,
-            is_fast,
-            include_1m_context,
-        ) {
+        if let Some(beta_str) =
+            build_beta_header(request.provider_options.as_ref(), auto_cache, is_fast)
+        {
             req = req.header("anthropic-beta", beta_str);
         }
 
@@ -1447,12 +1508,27 @@ impl ProviderAdapter for Adapter {
         }
         let (body, headers) = send_and_read_response(req, &self.provider_name, "type").await?;
 
-        let api_resp: ApiResponse = serde_json::from_str(&body).map_err(|e| {
+        let raw: serde_json::Value = serde_json::from_str(&body).map_err(|e| {
             Error::network(
                 format!("failed to parse {} response: {e}", self.provider_name),
                 e,
             )
         })?;
+        let api_resp: ApiResponse = serde_json::from_value(raw.clone()).map_err(|e| {
+            Error::network(
+                format!("failed to parse {} response: {e}", self.provider_name),
+                e,
+            )
+        })?;
+
+        if api_resp.stop_reason.as_deref() == Some("refusal") {
+            return Err(refusal_error(
+                &self.provider_name,
+                &api_resp.model,
+                raw,
+                api_resp.stop_details.as_ref(),
+            ));
+        }
 
         let content_parts: Vec<ContentPart> = api_resp
             .content
@@ -1486,7 +1562,7 @@ impl ProviderAdapter for Adapter {
             },
             finish_reason,
             usage: token_counts_from_api_usage(&api_resp.usage),
-            raw: serde_json::from_str(&body).ok(),
+            raw: Some(raw),
             warnings: vec![],
             rate_limit: parse_rate_limit_headers(&headers),
         })
@@ -1581,6 +1657,31 @@ impl ProviderAdapter for Adapter {
 
     fn supports_tool_choice(&self, mode: &str) -> bool {
         matches!(mode, "auto" | "none" | "required" | "named")
+    }
+
+    fn validate_request(&self, request: &Request) -> Result<(), Error> {
+        if let Some(tool_choice) = &request.tool_choice {
+            validate_tool_choice(self, tool_choice)?;
+        }
+
+        let model_info = common::catalog_model(self.catalog.as_deref(), &request.model);
+        if let Some(model) = model_info
+            .filter(|m| m.features.reasoning_effort == ReasoningEffortFeature::AlwaysAdaptive)
+        {
+            if let Some(kind @ ("enabled" | "disabled")) =
+                anthropic_thinking_type(request.provider_options.as_ref())
+            {
+                return Err(Error::Configuration {
+                    message: format!(
+                        "{} uses always-on adaptive thinking; provider_options.anthropic.thinking.type = \"{kind}\" is not supported. Omit thinking or set only display options.",
+                        model.display_name()
+                    ),
+                    source:  None,
+                });
+            }
+        }
+
+        Ok(())
     }
 }
 
@@ -1924,13 +2025,13 @@ mod tests {
 
     #[test]
     fn beta_header_includes_cache_header() {
-        let result = build_beta_header(None, true, false, false);
+        let result = build_beta_header(None, true, false);
         assert_eq!(result, Some(CACHE_BETA_HEADER.to_string()));
     }
 
     #[test]
     fn beta_header_no_cache_no_user_headers() {
-        let result = build_beta_header(None, false, false, false);
+        let result = build_beta_header(None, false, false);
         assert_eq!(result, None);
     }
 
@@ -1941,7 +2042,7 @@ mod tests {
                 "beta_headers": ["interleaved-thinking-2025-05-14"]
             }
         });
-        let result = build_beta_header(Some(&opts), true, false, false);
+        let result = build_beta_header(Some(&opts), true, false);
         assert_eq!(
             result,
             Some(format!(
@@ -1957,7 +2058,7 @@ mod tests {
                 "beta_headers": [CACHE_BETA_HEADER]
             }
         });
-        let result = build_beta_header(Some(&opts), true, false, false);
+        let result = build_beta_header(Some(&opts), true, false);
         // Should not duplicate the header
         assert_eq!(result, Some(CACHE_BETA_HEADER.to_string()));
     }
@@ -1969,8 +2070,23 @@ mod tests {
                 "beta_headers": ["interleaved-thinking-2025-05-14"]
             }
         });
-        let result = build_beta_header(Some(&opts), false, false, false);
+        let result = build_beta_header(Some(&opts), false, false);
         assert_eq!(result, Some("interleaved-thinking-2025-05-14".to_string()));
+    }
+
+    #[test]
+    fn refusal_error_falls_back_to_generic_label_when_model_is_empty() {
+        let err = refusal_error("anthropic", "", serde_json::json!({}), None);
+        match err {
+            Error::Provider { detail, .. } => {
+                assert!(
+                    detail.message.starts_with("The model refused"),
+                    "unexpected message: {}",
+                    detail.message
+                );
+            }
+            other => panic!("expected provider error, got {other:?}"),
+        }
     }
 
     #[test]
@@ -2515,7 +2631,7 @@ reasoning = true
         ];
 
         // No user headers — only cache header should appear
-        let header = build_beta_header(None, true, false, false).unwrap_or_default();
+        let header = build_beta_header(None, true, false).unwrap_or_default();
         for dep in &deprecated {
             assert!(
                 !header.contains(dep),
@@ -2529,7 +2645,7 @@ reasoning = true
                 "beta_headers": ["interleaved-thinking-2025-05-14"]
             }
         });
-        let header = build_beta_header(Some(&opts), true, false, false).unwrap_or_default();
+        let header = build_beta_header(Some(&opts), true, false).unwrap_or_default();
         for dep in &deprecated {
             assert!(
                 !header.contains(dep),
@@ -2909,7 +3025,7 @@ reasoning_effort = "levels"
     }
     #[test]
     fn beta_header_includes_both_cache_and_fast_mode() {
-        let result = build_beta_header(None, true, true, false);
+        let result = build_beta_header(None, true, true);
         let header = result.expect("should produce a header");
         assert!(
             header.contains(CACHE_BETA_HEADER),
